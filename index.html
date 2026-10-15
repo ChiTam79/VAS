@@ -8,7 +8,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
 <style>
-/* Bố cục: thanh trên (kết nối), danh sách file bên trái, cột nút bên phải (tốc độ, Gửi, Thêm, Xoá), hàng 5 nút điều khiển ở dưới. */
+/* Bố cục: thanh trên (kết nối), danh sách file bên trái, cột nút bên phải (tốc độ, Thêm, Xoá), hàng 5 nút điều khiển ở dưới. */
 :root{
   --bg:#1a1c1e; --surface:#24272a; --line:#363a3e; --fg:#eef1f3; --muted:#98a2a8;
   --sel-bg:#12908e; --sel-fg:#ffffff; --speed:#ffd21f; --ok:#59d38b; --warn:#ffb74d; --danger:#ff8a80;
@@ -113,8 +113,7 @@ button:disabled{cursor:not-allowed}
     <aside class="side">
       <div class="speed"><small>TỐC ĐỘ</small><b id="speed">–</b></div>
       <div class="spacer"></div>
-      <button class="cb" id="btnSend" type="button" disabled style="--bgc:var(--c-gui)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M12 17V4M7 9l5-5 5 5M5 20h14"/></svg></span>GỬI</button>
-      <button class="cb" id="btnAdd" type="button" style="--bgc:var(--c-them)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v4h4M12 11v6M9 14h6"/></svg></span>THÊM BÀI</button>
+      <button class="cb" id="btnAdd" type="button" disabled style="--bgc:var(--c-them)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v4h4M12 11v6M9 14h6"/></svg></span>THÊM BÀI</button>
       <button class="cb" id="btnDel" type="button" disabled style="--bgc:var(--c-xoa);--ink:var(--ink-dark)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></span><span id="delLbl">XOÁ</span></button>
     </aside>
   </div>
@@ -148,12 +147,30 @@ button:disabled{cursor:not-allowed}
 </div>
 
 <script id="core">
+
 /* ===== Phần lõi (không dùng DOM): hằng số, đọc file txt, tạo image, khung UART, giao thức ===== */
-const PAGE = 256, MAX_FILES = 60, MAX_DELAY = 32767, HDR_TABLE = 12, HDR_CRC = 254, IMG_VERSION = 1, DEFAULT_PAGES = 176;
-const CMD = { PING: 1, BEGIN: 2, PAGE: 3, END: 4, KEY: 5, STATUS: 6, SELECT: 7 };
+const PAGE = 256, MAX_FILES = 60, MAX_DELAY = 32767, NAME_LEN = 16, ADD_CHUNK = 64;
+const CMD = { PING: 1, BEGIN: 2, PAGE: 3, END: 4, KEY: 5, STATUS: 6, SELECT: 7, INFO: 8, NAMES: 9, DELETE: 10, ADD_BEGIN: 11, ADD_DATA: 12, ADD_END: 13 };
 const KEY = { TOI: 0, LUI: 1, TANG: 2, GIAM: 3, SS: 4 };
 const STATUS_TEXT = { 0: "OK", 1: "sai trình tự lệnh", 2: "tham số sai", 3: "lỗi ghi/xóa flash",
-  4: "header dữ liệu không hợp lệ", 5: "còn thiếu trang dữ liệu", 6: "sai CRC", 7: "lệnh không biết" };
+  4: "header dữ liệu không hợp lệ", 5: "còn thiếu dữ liệu", 6: "sai CRC", 7: "lệnh không biết", 8: "hết chỗ (60 file hoặc đầy bộ nhớ)" };
+
+/* Tên file lưu trên mạch: bỏ đuôi .txt, tối đa 16 byte UTF-8 (cắt ở ranh giới ký tự) */
+function nameBytes(fileName) {
+  const text = fileName.replace(/\.txt$/i, "").trim() || "file";
+  const out = new Uint8Array(NAME_LEN);
+  let n = 0;
+  for (const ch of text) {
+    const b = new TextEncoder().encode(ch);
+    if (n + b.length > NAME_LEN) break;
+    out.set(b, n); n += b.length;
+  }
+  return out;
+}
+function nameText(b16) {
+  let n = 0; while (n < b16.length && b16[n] !== 0 && b16[n] !== 0xFF) n++;
+  return new TextDecoder("utf-8").decode(b16.subarray(0, n));
+}
 
 function crc16(b, crc) {
   crc = crc === undefined ? 0xFFFF : crc;
@@ -201,35 +218,6 @@ function parseTxt(name, text) {
   return { words: Uint16Array.from(words), warnings: warnings, ms: ms };
 }
 
-/* lists: mảng Uint16Array (mỗi file một mảng); trả về Uint8Array bội số của 256 byte */
-function buildImage(lists) {
-  const n = lists.length;
-  if (n < 1) throw new Error("chưa có file nào");
-  if (n > MAX_FILES) throw new Error("tối đa " + MAX_FILES + " file (đang có " + n + ")");
-  let total = 0;
-  for (const l of lists) total += l.length;
-  if (total > 0xFFFF) throw new Error("tổng số dòng quá lớn");
-  const bodyLen = Math.ceil(total * 2 / PAGE) * PAGE;
-  const pages = 1 + bodyLen / PAGE;
-  const img = new Uint8Array(PAGE + bodyLen).fill(0xFF);
-  const dv = new DataView(img.buffer);
-  img.set([0x43, 0x58, 0x33, 0x33], 0);
-  dv.setUint16(4, IMG_VERSION, true); dv.setUint16(6, n, true); dv.setUint16(8, pages, true); dv.setUint16(10, 0, true);
-  let start = 0, o = PAGE;
-  for (let i = 0; i < MAX_FILES; i++) {
-    const c = i < n ? lists[i].length : 0;
-    dv.setUint16(HDR_TABLE + 4 * i, i < n ? start : 0, true);
-    dv.setUint16(HDR_TABLE + 4 * i + 2, c, true);
-    if (i < n) {
-      for (let k = 0; k < c; k++, o += 2) dv.setUint16(o, lists[i][k], true);
-      start += c;
-    }
-  }
-  dv.setUint16(252, 0, true);
-  dv.setUint16(HDR_CRC, crc16(img.subarray(0, HDR_CRC)), true);
-  return img;
-}
-
 function makeFrame(cmd, payload) {
   payload = payload || new Uint8Array(0);
   const f = new Uint8Array(2 + 3 + payload.length + 2);
@@ -242,22 +230,32 @@ function makeFrame(cmd, payload) {
 
 function unpackStatus(extra) { return { file: extra & 63, level: (extra >> 6) & 15, mode: (extra >> 10) & 3 }; }
 
-/* Phản hồi của mạch: A5 5A | status | cmd | extra(2) | crc(2) */
+/* Phản hồi của mạch: ngắn  A5 5A | status | cmd | extra(2) | crc(2)
+ *                     dài   A5 5C | status | cmd | len(2) | payload | crc(2) */
 class FrameParser {
   constructor() { this.buf = []; }
   push(bytes) {
     for (const b of bytes) this.buf.push(b);
-    const out = [];
+    const out = [], B = this.buf;
     for (;;) {
       let i = 0;
-      while (i + 1 < this.buf.length && !(this.buf[i] === 0xA5 && this.buf[i + 1] === 0x5A)) i++;
-      if (i > 0) this.buf.splice(0, i);
-      if (this.buf.length < 8) break;
-      const f = this.buf.slice(2, 8);
-      if (crc16(f.slice(0, 4)) === (f[4] | (f[5] << 8))) {
-        out.push({ status: f[0], cmd: f[1], extra: f[2] | (f[3] << 8) });
-        this.buf.splice(0, 8);
-      } else this.buf.splice(0, 1);
+      while (i + 1 < B.length && !(B[i] === 0xA5 && (B[i + 1] === 0x5A || B[i + 1] === 0x5C))) i++;
+      if (i > 0) B.splice(0, i);
+      if (B.length < 8) break;
+      if (B[1] === 0x5A) {
+        if (crc16(B.slice(2, 6)) === (B[6] | (B[7] << 8))) {
+          out.push({ status: B[2], cmd: B[3], extra: B[4] | (B[5] << 8), payload: null });
+          B.splice(0, 8);
+        } else B.splice(0, 1);
+      } else {
+        const len = B[4] | (B[5] << 8);
+        if (len > 80) { B.splice(0, 1); continue; }
+        if (B.length < 8 + len) break;
+        if (crc16(B.slice(2, 6 + len)) === (B[6 + len] | (B[7 + len] << 8))) {
+          out.push({ status: B[2], cmd: B[3], extra: len, payload: Uint8Array.from(B.slice(6, 6 + len)) });
+          B.splice(0, 8 + len);
+        } else B.splice(0, 1);
+      }
     }
     return out;
   }
@@ -265,8 +263,10 @@ class FrameParser {
 
 class LinkError extends Error {}
 
+const u16 = (p, o) => p[o] | (p[o + 1] << 8);
+
 class Link {
-  /* write(bytes) là hàm async do tầng BLE cung cấp (tự chia gói) */
+  /* write(bytes) là hàm async do tầng BLE cung cấp (tự chia gói và giãn nhịp cho UART 9600) */
   constructor(write) {
     this.write = write; this.parser = new FrameParser(); this.waiter = null;
     this.q = Promise.resolve(); this.pending = 0; this.onStatus = null;
@@ -287,7 +287,7 @@ class Link {
   }
   request(cmd, payload, o) {
     o = o || {};
-    const retries = o.retries === undefined ? 3 : o.retries, timeout = o.timeout || 2000;
+    const retries = o.retries === undefined ? 2 : o.retries, timeout = o.timeout || 2500;
     return this._lock(async () => {
       const frame = makeFrame(cmd, payload);
       let last = "";
@@ -301,12 +301,15 @@ class Link {
         let r;
         try { r = await w.promise; } catch (e) { last = "không có phản hồi"; continue; }
         if (r.status === 6) { last = "mạch nhận sai CRC"; continue; }
-        if (r.status === 1 && a > 0 && o.okIfStateOnRetry) return { status: 0, cmd: r.cmd, extra: r.extra };
-        if (r.status !== 0 && !o.allowStatus)
-          throw new LinkError("Mạch báo lỗi: " + (STATUS_TEXT[r.status] || "?") + " (mã " + r.status + ", tham số " + r.extra + ")");
+        if (r.status === 1 && a > 0 && o.okIfStateOnRetry) return { status: 0, cmd: r.cmd, extra: r.extra, payload: null, retried: true };
+        if (r.status !== 0 && !o.allowStatus) {
+          const e = new LinkError("Mạch báo lỗi: " + (STATUS_TEXT[r.status] || "?") + " (mã " + r.status + ", tham số " + r.extra + ")");
+          e.status = r.status; e.extra = r.extra; throw e;
+        }
         return r;
       }
-      throw new LinkError("Không liên lạc được với mạch (" + last + "). Kiểm tra baud 115200, dây TX/RX và nguồn.");
+      const e = new LinkError("Không liên lạc được với mạch (" + last + "). Kiểm tra dây PA5/PB1, nguồn và module BLE (9600).");
+      e.timeout = true; throw e;
     });
   }
   /* phím từ xa; drop = true: bỏ qua nếu đang bận (dùng cho tự lặp) */
@@ -317,30 +320,70 @@ class Link {
   /* chọn thẳng file số n (1..N) trên mạch */
   select(n) { return this.request(CMD.SELECT, Uint8Array.of(n), { retries: 1, timeout: 1200, allowStatus: true }).catch(() => null); }
   status() { return this.request(CMD.STATUS, null, { retries: 1, timeout: 1200, allowStatus: true }); }
-  async sendImage(image, o) {
-    o = o || {};
-    const log = o.log || function () {}, progress = o.progress || function () {};
-    const total = image.length / PAGE;
-    const cap = (await this.request(CMD.PING)).extra;
-    log("Mạch trả lời. Dung lượng tối đa " + cap + " trang.");
-    if (total > cap) throw new LinkError("Dữ liệu quá lớn: cần " + total + " trang, mạch chỉ chứa được " + cap + " trang.");
-    log("Bắt đầu nạp " + total + " trang (" + image.length + " byte).");
-    await this.request(CMD.BEGIN, Uint8Array.of(total & 255, total >> 8), { timeout: 3500, accept: f => f.extra === total });
-    const order = [];
-    for (let i = 1; i < total; i++) order.push(i);
-    order.push(0);                                   // header gửi cuối: mạch chỉ ghi header khi dữ liệu đã đủ
-    for (let n = 0; n < order.length; n++) {
-      const idx = order[n];
-      const p = new Uint8Array(2 + PAGE);
-      p[0] = idx & 255; p[1] = idx >> 8;
-      p.set(image.subarray(idx * PAGE, (idx + 1) * PAGE), 2);
-      await this.request(CMD.PAGE, p, { timeout: 3000, accept: f => f.extra === idx });
-      progress(n + 1, total);
+
+  /* INFO: số file, mã nhận dạng danh sách (sig), số trang đang dùng, số trang tối đa */
+  async info() {
+    const r = await this.request(CMD.INFO, null, { timeout: 2500 });
+    const p = r.payload;
+    if (!p || p.length < 8) throw new LinkError("Mạch trả lời INFO sai độ dài");
+    return { nfiles: u16(p, 0), sig: u16(p, 2), pages: u16(p, 4), cap: u16(p, 6) };
+  }
+  /* NAMES: chỉ khi mạch đang dừng. Trả về [{name, lines}] */
+  async names(first, count) {
+    const r = await this.request(CMD.NAMES, Uint8Array.of(first, count), { timeout: 3000 });
+    const p = r.payload, out = [];
+    if (!p || p.length !== count * (NAME_LEN + 2)) throw new LinkError("Mạch trả lời NAMES sai độ dài");
+    for (let k = 0; k < count; k++) {
+      const o = k * (NAME_LEN + 2);
+      out.push({ name: nameText(p.subarray(o, o + NAME_LEN)), lines: u16(p, o + NAME_LEN) });
     }
-    await this.request(CMD.END, null, { timeout: 3500, okIfStateOnRetry: true });
-    log("Nạp xong và kiểm tra thành công.");
+    return out;
+  }
+  async syncNames(nfiles, progress) {
+    const all = [];
+    for (let first = 0; first < nfiles; first += 4) {
+      const c = Math.min(4, nfiles - first);
+      for (const x of await this.names(first, c)) all.push(x);
+      if (progress) progress(all.length, nfiles);
+    }
+    return all;
+  }
+  /* Xoá file k (1..N). Không tự gửi lại: nếu mất phản hồi thì hỏi INFO và so mã nhận dạng. Trả về sig mới. */
+  async del(k, sigBefore) {
+    try {
+      const r = await this.request(CMD.DELETE, Uint8Array.of(k), { retries: 0, timeout: 8000 });
+      return r.extra;
+    } catch (e) {
+      if (!e.timeout) throw e;
+      let inf;
+      try { inf = await this.info(); } catch (x) { throw e; }
+      if (sigBefore !== undefined && inf.sig !== sigBefore) return inf.sig;
+      throw new LinkError("Mạch không phản hồi lệnh xoá và danh sách chưa đổi.");
+    }
+  }
+  /* Thêm một file: name = Uint8Array(16), words = Uint16Array. Trả về INFO mới. */
+  async addFile(name, words, o) {
+    o = o || {};
+    const progress = o.progress || function () {};
+    const n = words.length;
+    if (n < 1) throw new LinkError("File không có dòng dữ liệu nào");
+    if (n > 0xFFFF) throw new LinkError("File quá dài");
+    const p0 = new Uint8Array(2 + NAME_LEN);
+    p0[0] = n & 255; p0[1] = n >> 8; p0.set(name, 2);
+    await this.request(CMD.ADD_BEGIN, p0, { timeout: 4000, okIfStateOnRetry: true });
+    for (let off = 0; off < n; off += ADD_CHUNK) {
+      const c = Math.min(ADD_CHUNK, n - off);
+      const p = new Uint8Array(2 + 2 * c);
+      p[0] = off & 255; p[1] = off >> 8;
+      for (let k = 0; k < c; k++) { p[2 + 2 * k] = words[off + k] & 255; p[3 + 2 * k] = words[off + k] >> 8; }
+      await this.request(CMD.ADD_DATA, p, { timeout: 3500, accept: f => f.extra === off + c });
+      progress(off + c, n);
+    }
+    await this.request(CMD.ADD_END, null, { timeout: 8000, okIfStateOnRetry: true });
+    return this.info();
   }
 }
+
 </script>
 
 <script id="ui">
@@ -351,7 +394,9 @@ const KNOWN_SERVICES = [0xFFE0, 0xFFE5, 0xFFF0, 0xFFB0, 0xFFC0, 0xFFD0, 0xFF00, 
 const PREFERRED = ["0000ffe0", "6e400001", "0000fff0", "49535343"];
 
 const S = { dev: null, link: null, rx: null, tx: null, connected: false, connecting: false, sending: false,
-  files: [], cap: DEFAULT_PAGES, mode: -1, level: 0, fileNo: 0, selId: null, nextId: 1, sentSig: null, wake: null, armTimer: null };
+  files: [], sig: null, pages: 0, cap: 144, verified: false, mode: -1, level: 0, fileNo: 0, needSync: false, syncing: false,
+  wake: null, armTimer: null };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function log(t) {
   const el = $("log"), d = new Date(), p = n => String(n).padStart(2, "0");
@@ -362,7 +407,7 @@ function log(t) {
 function setMsg(t, kind) { const m = $("msg"); m.textContent = t || ""; m.className = kind || ""; }
 function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
 
-/* ---------- Lưu danh sách file (IndexedDB) ---------- */
+/* ---------- Lưu danh sách tên file trên điện thoại (IndexedDB) ---------- */
 function idb() { return new Promise((res, rej) => { const r = indexedDB.open("cx33", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function kvGet(k) {
   try { const db = await idb(); return await new Promise((res, rej) => { const q = db.transaction("kv").objectStore("kv").get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
@@ -372,22 +417,8 @@ async function kvSet(k, v) {
   try { const db = await idb(); await new Promise((res, rej) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
   catch (e) { log("Không lưu được danh sách vào trình duyệt."); }
 }
-const saveFiles = () => kvSet("files", S.files.map(f => ({ id: f.id, name: f.name, words: f.words, warnings: f.warnings, ms: f.ms })));
-
-/* ---------- Dữ liệu danh sách ---------- */
-const title = f => f.name.replace(/\.txt$/i, "");
-function sortFiles() {
-  S.files.sort((a, b) => title(a).localeCompare(title(b), "vi", { numeric: true, sensitivity: "base" }) || a.id - b.id);
-}
-function sig() {      // nhận dạng danh sách đã gửi: tên + số dòng + CRC nội dung theo thứ tự
-  return S.files.map(f => f.name + ":" + f.words.length + ":" + crc16(new Uint8Array(f.words.buffer, f.words.byteOffset, f.words.byteLength))).join("|");
-}
-const synced = () => S.sentSig !== null && S.sentSig === sig();
-function totals() {
-  let lines = 0; for (const f of S.files) lines += f.words.length;
-  return { lines: lines, pages: 1 + Math.ceil(lines * 2 / PAGE) };
-}
-const selIndex = () => S.files.findIndex(f => f.id === S.selId);
+/* bản lưu: mã nhận dạng (sig) của mạch + tên + số dòng từng file */
+const saveList = () => kvSet("list", { sig: S.sig, pages: S.pages, cap: S.cap, files: S.files.map(f => ({ name: f.name, lines: f.lines })) });
 
 /* ---------- Vẽ giao diện ---------- */
 function renderList() {
@@ -395,21 +426,22 @@ function renderList() {
   ol.innerHTML = "";
   if (!S.files.length) {
     const li = document.createElement("li"); li.className = "empty";
-    li.textContent = "Chưa có file nào. Bấm “THÊM BÀI” để chọn các file txt. Danh sách tự xếp theo tên A→Z, số bên trái là số file trên mạch.";
+    li.textContent = S.connected ? "Mạch chưa có file nào. Bấm “THÊM BÀI” để chọn file txt từ điện thoại, hoặc nạp bằng phần mềm trên máy tính qua USB."
+                                 : "Chưa có danh sách. Bấm nút Bluetooth để kết nối với mạch; tên file sẽ được đồng bộ về điện thoại.";
     ol.appendChild(li); return;
   }
-  const playing = S.mode === 2 && S.connected && synced();
+  const playing = S.mode === 2 && S.connected;
   S.files.forEach((f, i) => {
     const li = document.createElement("li");
     const b = document.createElement("button");
-    b.type = "button"; b.className = "row"; b.dataset.id = f.id;
-    const sel = f.id === S.selId;
+    b.type = "button"; b.className = "row"; b.dataset.no = i + 1;
+    const sel = i + 1 === S.fileNo;
     if (sel) { b.classList.add("sel"); b.setAttribute("aria-current", "true"); if (playing) b.classList.add("playing"); }
     const n = document.createElement("span"); n.className = "n"; n.textContent = String(i + 1).padStart(2, "0");
     const t = document.createElement("span"); t.className = "t";
-    const inner = document.createElement("span"); inner.textContent = title(f);
+    const inner = document.createElement("span"); inner.textContent = f.name || "(không tên)";
     t.appendChild(inner);
-    if (sel && playing) b.style.setProperty("--d", Math.max(7, 5 + title(f).length * 0.28).toFixed(1) + "s");
+    if (sel && playing) b.style.setProperty("--d", Math.max(7, 5 + f.name.length * 0.28).toFixed(1) + "s");
     b.append(n, t);
     li.appendChild(b); ol.appendChild(li);
   });
@@ -419,81 +451,161 @@ function renderSide() {
   $("speed").textContent = S.connected && S.level >= 1 && S.level <= 8 ? String(S.level) : "–";
 }
 function renderPad() {
-  const can = S.connected && !S.sending;
+  const can = S.connected && !S.sending && !S.syncing;
   for (const id of ["kLui", "kToi", "kGiam", "kTang", "kSS"]) $(id).disabled = !can;
   const play = S.mode === 2;
   $("ssIcon").innerHTML = play ? '<rect class="f" x="6.5" y="6.5" width="11" height="11" rx="1.5"/>' : '<path class="f" d="M8 5v14l11-7z"/>';
   $("ssLbl").textContent = play ? "STOP" : "START";
 }
 function renderFoot() {
-  const t = totals(), over = t.pages > S.cap;
   $("capLeft").innerHTML = "";
   const l = document.createElement("span");
-  l.textContent = S.files.length + " file · " + t.pages + " / " + S.cap + " trang";
-  if (over) { l.className = "over"; l.textContent += " (quá lớn)"; }
+  l.textContent = S.files.length + " file" + (S.pages ? " · " + S.pages + " / " + S.cap + " trang" : "");
+  if (S.pages && S.pages >= S.cap - 1) l.className = "over";
   $("capLeft").appendChild(l);
   const sy = $("sync");
-  if (!S.files.length) sy.textContent = "";
-  else if (synced()) { sy.className = "ok"; sy.textContent = "Mạch đã có danh sách này"; }
-  else { sy.className = "warn"; sy.textContent = "Chưa gửi xuống mạch"; }
-  const ok = S.connected && !S.sending && S.files.length > 0 && t.lines > 0 && !over;
-  $("btnSend").disabled = !ok;
-  $("btnAdd").disabled = S.sending;
-  $("btnDel").disabled = S.sending || !S.files.length;
+  if (!S.connected) { sy.className = ""; sy.textContent = S.files.length ? "Danh sách đã lưu trên điện thoại" : ""; }
+  else if (S.syncing) { sy.className = "warn"; sy.textContent = "Đang đồng bộ tên file…"; }
+  else if (S.verified) { sy.className = "ok"; sy.textContent = "Đã đồng bộ với mạch"; }
+  else { sy.className = "warn"; sy.textContent = "Chưa đồng bộ"; }
+  const idle = S.connected && !S.sending && !S.syncing && S.verified;
+  $("btnAdd").disabled = !idle;
+  $("btnDel").disabled = !idle || !S.files.length;
   $("btnConn").disabled = S.sending;
   $("btnConn").className = "chip bt" + (S.connected ? " on" : S.connecting ? " busy" : "");
   $("connText").className = S.connected ? "on" : "";
 }
 function renderAll() { renderList(); renderSide(); renderPad(); renderFoot(); }
+function showProg(text, frac) {
+  $("prog").hidden = false; $("progFill").style.width = Math.round(frac * 100) + "%"; $("progText").textContent = text;
+}
+const hideProg = () => { $("prog").hidden = true; };
+
+/* ---------- Đồng bộ tên file: chỉ khi mã nhận dạng của mạch khác bản đã lưu ---------- */
+async function refreshList(force) {
+  if (!S.link || S.syncing || S.sending) return;
+  const link = S.link;
+  S.syncing = true; renderAll();
+  try {
+    let inf;
+    try { inf = await link.info(); }
+    catch (e) {
+      if (e.status === 1) { S.needSync = true; setMsg("Mạch đang bận nhận/xoá file. Sẽ đồng bộ lại khi xong.", ""); return; }
+      throw e;
+    }
+    S.cap = inf.cap; S.pages = inf.pages;
+    if (!force && inf.sig === S.sig && inf.nfiles === S.files.length) {
+      S.verified = true; S.needSync = false; log("Danh sách không đổi (mã " + inf.sig + "), không cần đồng bộ."); saveList(); return;
+    }
+    if (inf.nfiles === 0) { S.files = []; S.sig = inf.sig; S.verified = true; S.needSync = false; saveList(); return; }
+    if (S.mode === 2) {
+      S.needSync = true; S.verified = false;
+      setMsg("Danh sách trên mạch đã đổi. Dừng file đang phát để đồng bộ tên file.", "");
+      return;
+    }
+    log("Đồng bộ " + inf.nfiles + " tên file…");
+    showProg("Đồng bộ tên file…", 0);
+    const names = await link.syncNames(inf.nfiles, (n, t) => showProg("Đồng bộ tên file " + n + " / " + t, n / t));
+    S.files = names; S.sig = inf.sig; S.verified = true; S.needSync = false;
+    saveList();
+    setMsg("Đã đồng bộ " + names.length + " tên file.", "ok");
+  } catch (e) {
+    S.verified = false;
+    if (e && e.status === 1) { S.needSync = true; setMsg("Mạch đang bận hoặc đang phát. Dừng phát để đồng bộ.", ""); }
+    else setMsg(e.message || String(e), "err");
+    log(String((e && e.message) || e));
+  } finally {
+    S.syncing = false; hideProg(); renderAll();
+  }
+}
 
 /* ---------- Danh sách: chọn, thêm, xoá ---------- */
 $("list").addEventListener("click", async e => {
-  const b = e.target.closest(".row"); if (!b || S.sending) return;
-  const id = +b.dataset.id, idx = S.files.findIndex(f => f.id === id);
-  if (idx < 0) return;
-  S.selId = id; renderAll();
-  if (!S.connected || !S.link) return;
-  if (!synced()) { setMsg("Danh sách đã đổi nên chưa chọn được trên mạch. Bấm GỬI để cập nhật mạch.", "err"); return; }
-  const r = await S.link.select(idx + 1);
-  if (r && r.status === 1) setMsg(unpackStatus(r.extra).mode === 3 ? "Mạch đang nhận file." : "Mạch chưa có dữ liệu file.", "err");
-  else if (r && r.status === 2) setMsg("Số file không có trên mạch. Bấm GỬI để cập nhật mạch.", "err");
+  const b = e.target.closest(".row"); if (!b || S.sending || S.syncing) return;
+  const no = +b.dataset.no;
+  if (!S.connected || !S.link || !S.verified) { setMsg("Kết nối và đồng bộ với mạch trước khi chọn file.", "err"); return; }
+  S.fileNo = no; renderAll();
+  const r = await S.link.select(no);
+  if (r && r.status === 1) setMsg(unpackStatus(r.extra).mode === 3 ? "Mạch đang bận nhận/xoá file." : "Mạch chưa có dữ liệu file.", "err");
+  else if (r && r.status === 2) { setMsg("Số file không có trên mạch. Đang đồng bộ lại…", "err"); refreshList(true); }
   else if (r) setMsg("");
 });
 $("btnAdd").addEventListener("click", () => $("fileIn").click());
 $("fileIn").addEventListener("change", async e => {
-  const errs = []; let added = 0, updated = 0, lastId = null;
-  for (const file of Array.from(e.target.files)) {
+  const picked = Array.from(e.target.files); e.target.value = "";
+  if (!picked.length || !S.link || S.sending) return;
+  const link = S.link, errs = [], warns = [];
+  const jobs = [];
+  for (const file of picked) {                       // đọc và kiểm tra hết trước khi gửi
     try {
-      const buf = new Uint8Array(await file.arrayBuffer());
-      const r = parseTxt(file.name, decodeText(buf));
-      const old = S.files.find(f => f.name === file.name);
-      if (old) { old.words = r.words; old.warnings = r.warnings; old.ms = r.ms; updated++; lastId = old.id; continue; }
-      if (S.files.length >= MAX_FILES) { errs.push("Đã đủ " + MAX_FILES + " file, bỏ " + file.name); continue; }
-      const f = { id: S.nextId++, name: file.name, words: r.words, warnings: r.warnings, ms: r.ms };
-      S.files.push(f); added++; lastId = f.id;
+      const r = parseTxt(file.name, decodeText(new Uint8Array(await file.arrayBuffer())));
+      if (r.words.length < 1) throw new Error(file.name + ": không có dòng dữ liệu nào");
+      r.warnings.forEach(w => warns.push(file.name + ": " + w));
+      jobs.push({ file: file, words: r.words, nb: nameBytes(file.name) });
     } catch (err) { errs.push(err.message); }
   }
-  e.target.value = "";
-  sortFiles(); if (lastId !== null) S.selId = lastId;
-  saveFiles(); renderAll();
-  const warn = S.files.flatMap(f => f.warnings.map(w => f.name + ": " + w));
-  if (errs.length) { setMsg(errs.join(" · "), "err"); errs.forEach(log); }
-  else if (added || updated) setMsg("Đã thêm " + added + " file" + (updated ? ", cập nhật " + updated : "") + ". Bấm GỬI để cập nhật cho mạch." + (warn.length ? " Cảnh báo: " + warn[0] : ""), "");
+  if (!jobs.length) { setMsg(errs.join(" · "), "err"); return; }
+  S.sending = true; endAllRepeat(); disarm(); renderAll();
+  let done = 0; const t0 = Date.now(); let lastNo = 0;
+  try {
+    for (let j = 0; j < jobs.length; j++) {
+      const job = jobs[j], label = nameText(job.nb);
+      if (S.files.length >= MAX_FILES) { errs.push("Đã đủ " + MAX_FILES + " file, bỏ " + job.file.name); continue; }
+      setMsg("Đang thêm “" + label + "” (" + (j + 1) + "/" + jobs.length + "). Giữ điện thoại gần mạch, không đóng trang.", "");
+      showProg("“" + label + "” 0%", 0);
+      try {
+        const inf = await link.addFile(job.nb, job.words, { progress: (n, t) => showProg("“" + label + "” " + Math.round(n / t * 100) + "% · " + (j + 1) + "/" + jobs.length, n / t) });
+        S.cap = inf.cap; S.pages = inf.pages;
+        if (inf.nfiles === S.files.length + 1) { S.files.push({ name: label, lines: job.words.length }); S.sig = inf.sig; lastNo = inf.nfiles; }
+        else { S.verified = false; S.needSync = true; }
+        done++;
+      } catch (err) {
+        if (err.status === 8) errs.push("Không đủ chỗ để thêm “" + label + "”");
+        else { errs.push(err.message || String(err)); break; }
+      }
+    }
+  } finally {
+    S.sending = false; hideProg(); saveList();
+  }
+  if (!S.verified) { renderAll(); await refreshList(true); }
+  if (lastNo && S.verified) { S.fileNo = lastNo; await link.select(lastNo); }
+  await link.status().catch(() => null);
+  renderAll();
+  if (errs.length) setMsg(errs.join(" · "), "err");
+  else setMsg("Đã thêm " + done + " file (" + Math.round((Date.now() - t0) / 1000) + " s)." + (warns.length ? " Cảnh báo: " + warns[0] : ""), "ok");
+  errs.forEach(log);
 });
 function disarm() { clearTimeout(S.armTimer); S.armTimer = null; $("btnDel").classList.remove("armed"); $("delLbl").textContent = "XOÁ"; }
-$("btnDel").addEventListener("click", () => {
-  if (S.sending || !S.files.length) return;
-  if (selIndex() < 0) { setMsg("Chạm vào một file trong danh sách để chọn file cần xoá.", "err"); return; }
+$("btnDel").addEventListener("click", async () => {
+  if (S.sending || S.syncing || !S.link || !S.files.length) return;
+  const i = S.fileNo - 1;
+  if (i < 0 || i >= S.files.length) { setMsg("Chạm vào một file trong danh sách để chọn file cần xoá.", "err"); return; }
   if (!S.armTimer) {                                   // lần chạm đầu: hỏi lại
     $("btnDel").classList.add("armed"); $("delLbl").textContent = "XÁC NHẬN";
-    setMsg("Chạm XOÁ lần nữa để xoá “" + title(S.files[selIndex()]) + "”.", "err");
+    setMsg("Chạm XOÁ lần nữa để xoá “" + S.files[i].name + "”.", "err");
     S.armTimer = setTimeout(() => { disarm(); setMsg(""); }, 3500); return;
   }
-  const i = selIndex(); disarm();
-  const gone = S.files.splice(i, 1)[0];
-  S.selId = S.files.length ? S.files[Math.min(i, S.files.length - 1)].id : null;
-  saveFiles(); renderAll();
-  setMsg("Đã xoá “" + title(gone) + "”. Bấm GỬI để cập nhật cho mạch.", "");
+  disarm();
+  const link = S.link, gone = S.files[i];
+  S.sending = true; endAllRepeat(); showProg("Đang xoá “" + gone.name + "”…", 0.5); setMsg("Đang xoá, không tắt nguồn mạch.", ""); renderAll();
+  let ok = false;
+  try {
+    const sig = await link.del(i + 1, S.sig);
+    S.files.splice(i, 1); S.sig = sig; ok = true;
+    if (S.fileNo > S.files.length) S.fileNo = S.files.length;
+    saveList();
+  } catch (e) {
+    setMsg(e.message || String(e), "err"); log(String(e.message || e)); S.verified = false;
+  } finally {
+    S.sending = false; hideProg(); renderAll();
+  }
+  if (ok) {
+    const inf = await link.info().catch(() => null);
+    if (inf) { S.cap = inf.cap; S.pages = inf.pages; if (inf.nfiles !== S.files.length || inf.sig !== S.sig) { await refreshList(true); } else saveList(); }
+    await link.status().catch(() => null);
+    renderAll();
+    setMsg("Đã xoá “" + gone.name + "”.", "ok");
+  } else await refreshList(true);
 });
 
 /* ---------- BLE ---------- */
@@ -549,13 +661,14 @@ function noBluetoothMsg() {
 }
 
 function onStatus(st) {
+  const prev = S.mode;
   S.mode = st.mode;
   if (st.level >= 1 && st.level <= 8) S.level = st.level;
-  if ((st.mode === 1 || st.mode === 2) && st.file > 0) {
-    S.fileNo = st.file;
-    if (synced() && S.files[st.file - 1]) S.selId = S.files[st.file - 1].id;
-  }
+  if ((st.mode === 1 || st.mode === 2) && st.file > 0) S.fileNo = st.file;
   renderAll();
+  if (S.sending || S.syncing || !S.link) return;
+  // mạch vừa nhận/xoá/thêm file (có thể do máy tính qua USB): kiểm tra lại mã nhận dạng; hoặc đã dừng phát sau khi bị hoãn đồng bộ
+  if ((prev === 3 && st.mode !== 3) || (S.needSync && st.mode === 1)) refreshList(false);
 }
 
 async function connect() {
@@ -580,21 +693,21 @@ async function connect() {
         const part = bytes.subarray(i, i + size);
         if (noResp && S.tx.writeValueWithoutResponse) await S.tx.writeValueWithoutResponse(part);
         else await S.tx.writeValue(part);
+        await sleep(Math.ceil(part.length * 1.15));      // UART 9600 của module: ~1,04 ms mỗi byte, giãn nhịp để không tràn bộ đệm
       }
     });
     S.link.onStatus = onStatus;
     await S.rx.startNotifications();
     S.rx.addEventListener("characteristicvaluechanged", e => { const v = e.target.value; S.link && S.link.onBytes(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)); });
-    S.connected = true; S.connecting = false; S.mode = -1;
+    S.connected = true; S.connecting = false; S.mode = -1; S.verified = false; S.needSync = false;
     log("Kênh nhận " + short(S.rx.uuid) + ", kênh gửi " + short(S.tx.uuid) + ", gói " + size + " byte" + (noResp ? ", không chờ phản hồi" : ", có phản hồi"));
     $("connText").textContent = dev.name || "Đã kết nối";
     renderAll();
     try { S.wake = await navigator.wakeLock.request("screen"); } catch (e) {}
     await new Promise(r => setTimeout(r, 250));
     const r = await S.link.status().catch(() => null);
-    if (!r) setMsg("Đã kết nối BLE nhưng mạch chưa trả lời. Kiểm tra baud 115200 của module và dây TX/RX.", "err");
-    else if (unpackStatus(r.extra).mode === 0) setMsg("Mạch chưa có dữ liệu file. Thêm file rồi bấm GỬI.", "");
-    else if (!synced() && S.files.length) setMsg("Chưa rõ mạch đang có danh sách nào. Bấm GỬI để đồng bộ.", "");
+    if (!r) setMsg("Đã kết nối BLE nhưng mạch chưa trả lời. Kiểm tra dây PA5/PB1, nguồn và module BLE (9600).", "err");
+    else await refreshList(false);
   } catch (e) {
     S.connected = false; S.connecting = false;
     try { S.dev && S.dev.gatt && S.dev.gatt.connected && S.dev.gatt.disconnect(); } catch (x) {}
@@ -608,7 +721,7 @@ async function connect() {
 function onDisc() {
   endAllRepeat();
   const was = S.connected;
-  S.connected = false; S.connecting = false; S.link = null; S.mode = -1; S.sending = false;
+  S.connected = false; S.connecting = false; S.link = null; S.mode = -1; S.sending = false; S.syncing = false; S.verified = false;
   try { S.wake && S.wake.release(); } catch (e) {}
   $("connText").textContent = "Không kết nối";
   if (was) setMsg("Mất kết nối với module BLE. Bấm nút Bluetooth để nối lại.", "err");
@@ -626,7 +739,7 @@ function press(k, drop) {
   if (!S.connected || S.sending || !S.link) return;
   S.link.key(k, drop).then(r => {
     if (!r) return;
-    if (r.status === 1) setMsg(unpackStatus(r.extra).mode === 3 ? "Mạch đang nhận file." : "Mạch chưa có dữ liệu file. Thêm file rồi bấm GỬI.", "err");
+    if (r.status === 1) setMsg(unpackStatus(r.extra).mode === 3 ? "Mạch đang bận nhận/xoá file." : "Mạch chưa có dữ liệu file. Bấm THÊM BÀI hoặc nạp bằng máy tính.", "err");
     else if (r.status === 0 && $("msg").classList.contains("err")) setMsg("");
   });
 }
@@ -649,35 +762,6 @@ bindKey("kToi", KEY.TOI, true); bindKey("kLui", KEY.LUI, true);
 bindKey("kTang", KEY.TANG, false); bindKey("kGiam", KEY.GIAM, false); bindKey("kSS", KEY.SS, false);
 document.addEventListener("visibilitychange", () => { if (document.hidden) endAllRepeat(); });
 
-/* ---------- Gửi xuống mạch ---------- */
-$("btnSend").addEventListener("click", async () => {
-  if (!S.connected || S.sending) return;
-  S.sending = true; endAllRepeat(); disarm();
-  $("prog").hidden = false; $("progFill").style.width = "0"; $("progText").textContent = "Đang chuẩn bị…";
-  setMsg("Đang gửi file xuống mạch. Giữ điện thoại gần mạch, không đóng trang.", "");
-  renderAll();
-  const t0 = Date.now();
-  try {
-    const image = buildImage(S.files.map(f => f.words));
-    await S.link.sendImage(image, {
-      log: log,
-      progress: (n, total) => {
-        $("progFill").style.width = (n / total * 100) + "%";
-        $("progText").textContent = "Đang gửi trang " + n + " / " + total + " · " + Math.round(n / total * 100) + "%";
-      }
-    });
-    S.sentSig = sig(); ls("sentSig", S.sentSig);
-    S.sending = false;
-    setMsg("Đã gửi xong " + S.files.length + " file (" + Math.round((Date.now() - t0) / 1000) + " s).", "ok");
-    await S.link.status().catch(() => null);      // cập nhật file đang chọn, tốc độ, trạng thái
-  } catch (e) {
-    setMsg(e.message || String(e), "err"); log(String(e.message || e));
-  } finally {
-    S.sending = false; $("prog").hidden = true;
-    renderAll();
-  }
-});
-
 /* ---------- Cài đặt ---------- */
 $("btnSet").addEventListener("click", () => { $("sheet").hidden = false; });
 $("btnClose").addEventListener("click", () => { $("sheet").hidden = true; });
@@ -690,18 +774,12 @@ for (const id of ["uuidSvc", "uuidRx", "uuidTx", "chunk"]) {
 
 /* ---------- Khởi động ---------- */
 (async function init() {
-  S.sentSig = ls("sentSig");
-  renderAll();
-  const saved = await kvGet("files");
-  if (Array.isArray(saved)) {
-    S.files = saved.filter(f => f && f.words && f.name).map(f => ({ id: f.id, name: f.name, words: f.words, warnings: f.warnings || [], ms: f.ms || 0 }));
-    S.nextId = S.files.reduce((m, f) => Math.max(m, f.id || 0), 0) + 1;
-    sortFiles();
-    if (S.files.length) S.selId = S.files[0].id;
+  const saved = await kvGet("list");
+  if (saved && Array.isArray(saved.files)) {
+    S.files = saved.files.filter(f => f && typeof f.name === "string").map(f => ({ name: f.name, lines: f.lines || 0 }));
+    S.sig = saved.sig === undefined ? null : saved.sig; S.pages = saved.pages || 0; S.cap = saved.cap || 144;
   }
   renderAll();
   if (!navigator.bluetooth) setMsg(noBluetoothMsg(), "err");
 })();
 </script>
-
-</html>
