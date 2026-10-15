@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}</style>
+<title>CX33 Điều khiển</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Bố cục: thanh trên (kết nối), danh sách file bên trái, cột nút bên phải (tốc độ, Gửi, Thêm, Xoá), hàng 5 nút điều khiển ở dưới. */
+:root{
+  --bg:#1a1c1e; --surface:#24272a; --line:#363a3e; --fg:#eef1f3; --muted:#98a2a8;
+  --sel-bg:#12908e; --sel-fg:#ffffff; --speed:#ffd21f; --ok:#59d38b; --warn:#ffb74d; --danger:#ff8a80;
+  --accent:#4cc3e0; --ring:#e7eaec;
+  --c-lui:#1f8fd1; --c-toi:#f0a90f; --c-go:#e8622a; --c-cham:#12a18a; --c-nhanh:#2e9e4d;
+  --c-gui:#7a4cd6; --c-them:#2e9e4d; --c-xoa:#e0a010; --ink:#ffffff; --ink-dark:#201600;
+  --sans:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --disp:"Barlow Condensed","Barlow",system-ui,sans-serif;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#e8ebed; --surface:#ffffff; --line:#cdd2d6; --fg:#15191c; --muted:#5b666d;
+  --sel-bg:#bfe8e5; --sel-fg:#043f3d; --speed:#a86f00; --ok:#1d7a46; --warn:#9a5b00; --danger:#b3261e;
+  --accent:#0b6e8a; --ring:#ffffff; color-scheme:light}}
+:root[data-theme="light"]{
+  --bg:#e8ebed; --surface:#ffffff; --line:#cdd2d6; --fg:#15191c; --muted:#5b666d;
+  --sel-bg:#bfe8e5; --sel-fg:#043f3d; --speed:#a86f00; --ok:#1d7a46; --warn:#9a5b00; --danger:#b3261e;
+  --accent:#0b6e8a; --ring:#ffffff; color-scheme:light}
+*{box-sizing:border-box}
+html,body{height:100%}
+@supports (height:100dvh){html,body{height:100dvh}}
+body{background:var(--bg);color:var(--fg);font:16px/1.35 var(--sans);overflow-x:hidden;
+  padding-block:8px 6px;padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px));
+  -webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+button:disabled{cursor:not-allowed}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.app{max-width:520px;height:100%;margin:0 auto;display:flex;flex-direction:column;gap:8px;min-height:0}
+.bar{display:flex;align-items:center;gap:10px;min-height:48px}
+.title{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.1}
+.title b{font:700 26px var(--disp);letter-spacing:.04em}
+.title span{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title span.on{color:var(--ok)}
+.chip{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:2px solid var(--line)}
+.chip svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.chip.bt{background:#1b6fd1;border-color:var(--ring);color:#fff}
+.chip.bt.on{background:#1e8f4e}
+.chip.bt.busy{background:#1b6fd1;animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+#msg{margin:0;min-height:20px;font-size:14px;color:var(--muted)}
+#msg.err{color:var(--danger)} #msg.ok{color:var(--ok)}
+.prog{position:relative;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--line);overflow:hidden}
+.prog i{position:absolute;inset:0 auto 0 0;width:0;background:var(--c-gui);transition:width .15s}
+.prog span{position:relative;display:block;text-align:center;font:600 13px/20px var(--sans);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.main{flex:1;min-height:0;display:flex;gap:8px}
+.list{flex:1;min-width:0;margin:0;padding:0;list-style:none;overflow-y:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.list li{margin:0}
+.row{display:flex;align-items:center;gap:10px;width:100%;min-height:50px;padding:6px 12px;text-align:left;font-size:19px;border-bottom:1px solid var(--line)}
+.row .n{flex:none;font:500 13px/1 var(--disp);letter-spacing:.06em;color:var(--muted);width:22px}
+.row .t{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.row.sel{background:var(--sel-bg);color:var(--sel-fg);font-weight:700}
+.row.sel .n{color:inherit;opacity:.8}
+.row.sel.playing .t{text-overflow:clip}
+.row.sel.playing .t>span{display:inline-block;padding-left:100%;animation:mq var(--d,10s) linear infinite}
+@keyframes mq{to{transform:translateX(-100%)}}
+.empty{padding:18px 14px;color:var(--muted);font-size:15px}
+.side{flex:none;width:68px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.speed{width:100%;text-align:center;line-height:1}
+.speed small{display:block;font:600 11px var(--disp);letter-spacing:.14em;color:var(--muted)}
+.speed b{display:block;font:700 56px/1 var(--disp);color:var(--speed)}
+.cb{display:flex;flex-direction:column;align-items:center;gap:3px;font:600 11px var(--disp);letter-spacing:.1em;color:var(--muted)}
+.rb{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;border:3px solid var(--ring);box-shadow:0 2px 6px rgba(0,0,0,.35);color:var(--ink);background:var(--bgc)}
+.rb svg{width:28px;height:28px;stroke:currentColor;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.rb svg .f{fill:currentColor;stroke:none}
+.cb:active:not(:disabled) .rb{transform:scale(.93)}
+.cb:disabled{opacity:.4}
+.cb.armed .rb{background:#c62828;color:#fff}
+.cb.armed{color:var(--danger)}
+.side .spacer{flex:1}
+.foot{display:flex;justify-content:space-between;gap:8px;font:13px var(--sans);color:var(--muted);min-height:18px}
+.foot .ok{color:var(--ok)} .foot .warn{color:var(--warn)} .foot .over{color:var(--danger)}
+.pad{display:flex;justify-content:space-between;align-items:flex-end;gap:4px;padding-bottom:2px}
+.pad .rb{width:min(58px,14.5vw);height:min(58px,14.5vw)}
+.pad .big .rb{width:min(78px,19vw);height:min(78px,19vw)}
+.pad .big .rb svg{width:50%;height:50%}
+.sheet{position:fixed;inset:0;z-index:5;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+.sheet[hidden]{display:none}
+.sheet .box{width:100%;max-width:520px;max-height:88%;overflow:auto;background:var(--surface);border-radius:16px 16px 0 0;padding:16px max(16px,env(safe-area-inset-left,0px)) calc(16px + env(safe-area-inset-bottom,0px))}
+.sheet h2{margin:0 0 6px;font:700 20px var(--disp);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center}
+.sheet label{display:flex;flex-direction:column;gap:4px;margin-top:10px;font-size:13px;color:var(--muted)}
+.sheet input{font:15px ui-monospace,Menlo,Consolas,monospace;min-height:42px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:0 10px;width:100%}
+.sheet p{margin:10px 0 0;font-size:13px;color:var(--muted)}
+.sheet pre{margin:10px 0 0;max-height:200px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.close{min-width:44px;min-height:44px;font-size:15px;color:var(--accent)}
+@media (max-height:760px){.speed b{font-size:44px}}
+@media (max-height:640px){.side{gap:6px}.side .rb{width:46px;height:46px}.side .rb svg{width:24px;height:24px}.speed b{font-size:38px}.cb{font-size:10px}}
+@media (max-height:620px){.pad .big .rb{width:min(66px,17vw);height:min(66px,17vw)}}
+@media (prefers-reduced-motion:reduce){.row.sel.playing .t>span{animation:none;padding-left:0}.row.sel.playing .t{text-overflow:ellipsis}.chip.bt.busy{animation:none}.prog i{transition:none}}
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="title"><b>CX33</b><span id="connText">Không kết nối</span></div>
+    <button class="chip" id="btnSet" type="button" aria-label="Cài đặt"><svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
+    <button class="chip bt" id="btnConn" type="button" aria-label="Kết nối Bluetooth"><svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg></button>
+  </header>
+  <p id="msg" aria-live="polite"></p>
+  <div class="prog" id="prog" hidden><i id="progFill"></i><span id="progText"></span></div>
+
+  <div class="main">
+    <ol class="list" id="list" aria-label="Danh sách file"></ol>
+    <aside class="side">
+      <div class="speed"><small>TỐC ĐỘ</small><b id="speed">–</b></div>
+      <div class="spacer"></div>
+      <button class="cb" id="btnSend" type="button" disabled style="--bgc:var(--c-gui)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M12 17V4M7 9l5-5 5 5M5 20h14"/></svg></span>GỬI</button>
+      <button class="cb" id="btnAdd" type="button" style="--bgc:var(--c-them)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v4h4M12 11v6M9 14h6"/></svg></span>THÊM BÀI</button>
+      <button class="cb" id="btnDel" type="button" disabled style="--bgc:var(--c-xoa);--ink:var(--ink-dark)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></span><span id="delLbl">XOÁ</span></button>
+    </aside>
+  </div>
+  <input id="fileIn" type="file" accept=".txt,text/plain" multiple hidden>
+
+  <div class="foot"><span id="capLeft"></span><span id="sync"></span></div>
+
+  <nav class="pad" aria-label="Phím điều khiển">
+    <button class="cb" id="kLui" type="button" disabled style="--bgc:var(--c-lui)"><span class="rb"><svg viewBox="0 0 24 24"><path class="f" d="M19 5v14L9 12z"/><path d="M6 5v14"/></svg></span>LÙI</button>
+    <button class="cb" id="kToi" type="button" disabled style="--bgc:var(--c-toi);--ink:var(--ink-dark)"><span class="rb"><svg viewBox="0 0 24 24"><path class="f" d="M5 5v14l10-7z"/><path d="M18 5v14"/></svg></span>TỚI</button>
+    <button class="cb big" id="kSS" type="button" disabled style="--bgc:var(--c-go)"><span class="rb"><svg id="ssIcon" viewBox="0 0 24 24"><path class="f" d="M8 5v14l11-7z"/></svg></span><span id="ssLbl">START</span></button>
+    <button class="cb" id="kGiam" type="button" disabled style="--bgc:var(--c-cham)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></span>CHẬM</button>
+    <button class="cb" id="kTang" type="button" disabled style="--bgc:var(--c-nhanh)"><span class="rb"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg></span>NHANH</button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-label="Cài đặt">
+    <h2>Cài đặt BLE <button class="close" id="btnClose" type="button">Đóng</button></h2>
+    <label for="uuidSvc">UUID service (để trống để tự tìm)
+      <input id="uuidSvc" placeholder="FFE0 hoặc 6e400001-b5a3-f393-e0a9-e50e24dcca9e" autocomplete="off" spellcheck="false"></label>
+    <label for="uuidRx">UUID nhận dữ liệu từ mạch (notify)
+      <input id="uuidRx" placeholder="FFE1" autocomplete="off" spellcheck="false"></label>
+    <label for="uuidTx">UUID gửi dữ liệu xuống mạch (write)
+      <input id="uuidTx" placeholder="FFE1" autocomplete="off" spellcheck="false"></label>
+    <label for="chunk">Số byte mỗi gói BLE
+      <input id="chunk" inputmode="numeric" value="20" autocomplete="off"></label>
+    <p>Nếu app không tìm thấy kênh dữ liệu, mở nRF Connect để xem UUID của module, nhập vào đây rồi kết nối lại. Số byte mỗi gói để 20 là an toàn nhất.</p>
+    <pre id="log" aria-label="Nhật ký"></pre>
+  </div>
+</div>
+
+<script id="core">
+/* ===== Phần lõi (không dùng DOM): hằng số, đọc file txt, tạo image, khung UART, giao thức ===== */
+const PAGE = 256, MAX_FILES = 60, MAX_DELAY = 32767, HDR_TABLE = 12, HDR_CRC = 254, IMG_VERSION = 1, DEFAULT_PAGES = 176;
+const CMD = { PING: 1, BEGIN: 2, PAGE: 3, END: 4, KEY: 5, STATUS: 6, SELECT: 7 };
+const KEY = { TOI: 0, LUI: 1, TANG: 2, GIAM: 3, SS: 4 };
+const STATUS_TEXT = { 0: "OK", 1: "sai trình tự lệnh", 2: "tham số sai", 3: "lỗi ghi/xóa flash",
+  4: "header dữ liệu không hợp lệ", 5: "còn thiếu trang dữ liệu", 6: "sai CRC", 7: "lệnh không biết" };
+
+function crc16(b, crc) {
+  crc = crc === undefined ? 0xFFFF : crc;
+  for (let i = 0; i < b.length; i++) {
+    crc ^= b[i];
+    for (let k = 0; k < 8; k++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xA001) : (crc >>> 1);
+  }
+  return crc & 0xFFFF;
+}
+
+function decodeText(buf) {
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return new TextDecoder("utf-16le").decode(buf.subarray(2));
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) return new TextDecoder("utf-16be").decode(buf.subarray(2));
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf).replace(/^﻿/, ""); }
+  catch (e) { return new TextDecoder("windows-1252").decode(buf); }
+}
+
+/* Dòng 1 = tổng số dòng dữ liệu. Từ dòng 2: cột 1 = thời gian (ms), cột 2 = mức output, các cột sau bỏ qua. */
+function parseTxt(name, text) {
+  const warnings = [];
+  const lines = text.split(/\r\n|\r|\n/);
+  let idx = 0;
+  while (idx < lines.length && !lines[idx].trim()) idx++;
+  if (idx >= lines.length) throw new Error(name + ": file rỗng");
+  const first = lines[idx].trim().split(/[\s,;]+/)[0];
+  const count = Math.trunc(Number(first));
+  if (first === "" || !isFinite(count)) throw new Error(name + ": dòng đầu phải là tổng số dòng dữ liệu");
+  if (count < 0) throw new Error(name + ": tổng số dòng không hợp lệ");
+  const words = [];
+  for (let ln = idx + 1; ln < lines.length; ln++) {
+    const t = lines[ln].trim();
+    if (!t) continue;
+    if (words.length >= count) { warnings.push("Có nhiều dòng hơn số dòng khai báo (" + count + "), phần thừa bị bỏ"); break; }
+    const tok = t.split(/[\s,;]+/).filter(Boolean);
+    if (tok.length < 2) throw new Error(name + " dòng " + (ln + 1) + ": cần ít nhất 2 cột (thời gian, mức output)");
+    const d = Number(tok[0]), l = Number(tok[1]);
+    if (!isFinite(d) || !isFinite(l)) throw new Error(name + " dòng " + (ln + 1) + ": giá trị không phải số");
+    const delay = Math.round(d);
+    if (delay < 0 || delay > MAX_DELAY) throw new Error(name + " dòng " + (ln + 1) + ": thời gian " + delay + " ms ngoài khoảng 0.." + MAX_DELAY);
+    words.push(((Math.trunc(l) !== 0 ? 1 : 0) << 15) | delay);
+  }
+  if (words.length < count) warnings.push("Khai báo " + count + " dòng nhưng chỉ có " + words.length + " dòng dữ liệu");
+  let ms = 0;
+  for (const w of words) ms += w & 0x7FFF;
+  return { words: Uint16Array.from(words), warnings: warnings, ms: ms };
+}
+
+/* lists: mảng Uint16Array (mỗi file một mảng); trả về Uint8Array bội số của 256 byte */
+function buildImage(lists) {
+  const n = lists.length;
+  if (n < 1) throw new Error("chưa có file nào");
+  if (n > MAX_FILES) throw new Error("tối đa " + MAX_FILES + " file (đang có " + n + ")");
+  let total = 0;
+  for (const l of lists) total += l.length;
+  if (total > 0xFFFF) throw new Error("tổng số dòng quá lớn");
+  const bodyLen = Math.ceil(total * 2 / PAGE) * PAGE;
+  const pages = 1 + bodyLen / PAGE;
+  const img = new Uint8Array(PAGE + bodyLen).fill(0xFF);
+  const dv = new DataView(img.buffer);
+  img.set([0x43, 0x58, 0x33, 0x33], 0);
+  dv.setUint16(4, IMG_VERSION, true); dv.setUint16(6, n, true); dv.setUint16(8, pages, true); dv.setUint16(10, 0, true);
+  let start = 0, o = PAGE;
+  for (let i = 0; i < MAX_FILES; i++) {
+    const c = i < n ? lists[i].length : 0;
+    dv.setUint16(HDR_TABLE + 4 * i, i < n ? start : 0, true);
+    dv.setUint16(HDR_TABLE + 4 * i + 2, c, true);
+    if (i < n) {
+      for (let k = 0; k < c; k++, o += 2) dv.setUint16(o, lists[i][k], true);
+      start += c;
+    }
+  }
+  dv.setUint16(252, 0, true);
+  dv.setUint16(HDR_CRC, crc16(img.subarray(0, HDR_CRC)), true);
+  return img;
+}
+
+function makeFrame(cmd, payload) {
+  payload = payload || new Uint8Array(0);
+  const f = new Uint8Array(2 + 3 + payload.length + 2);
+  f[0] = 0xA5; f[1] = 0x5A; f[2] = cmd; f[3] = payload.length & 255; f[4] = payload.length >> 8;
+  f.set(payload, 5);
+  const c = crc16(f.subarray(2, 5 + payload.length));
+  f[5 + payload.length] = c & 255; f[6 + payload.length] = c >> 8;
+  return f;
+}
+
+function unpackStatus(extra) { return { file: extra & 63, level: (extra >> 6) & 15, mode: (extra >> 10) & 3 }; }
+
+/* Phản hồi của mạch: A5 5A | status | cmd | extra(2) | crc(2) */
+class FrameParser {
+  constructor() { this.buf = []; }
+  push(bytes) {
+    for (const b of bytes) this.buf.push(b);
+    const out = [];
+    for (;;) {
+      let i = 0;
+      while (i + 1 < this.buf.length && !(this.buf[i] === 0xA5 && this.buf[i + 1] === 0x5A)) i++;
+      if (i > 0) this.buf.splice(0, i);
+      if (this.buf.length < 8) break;
+      const f = this.buf.slice(2, 8);
+      if (crc16(f.slice(0, 4)) === (f[4] | (f[5] << 8))) {
+        out.push({ status: f[0], cmd: f[1], extra: f[2] | (f[3] << 8) });
+        this.buf.splice(0, 8);
+      } else this.buf.splice(0, 1);
+    }
+    return out;
+  }
+}
+
+class LinkError extends Error {}
+
+class Link {
+  /* write(bytes) là hàm async do tầng BLE cung cấp (tự chia gói) */
+  constructor(write) {
+    this.write = write; this.parser = new FrameParser(); this.waiter = null;
+    this.q = Promise.resolve(); this.pending = 0; this.onStatus = null;
+  }
+  onBytes(bytes) { for (const f of this.parser.push(bytes)) this._frame(f); }
+  _frame(f) {
+    if (f.cmd === CMD.KEY || f.cmd === CMD.STATUS || f.cmd === CMD.SELECT) { if (this.onStatus) this.onStatus(unpackStatus(f.extra), f); }
+    const w = this.waiter;
+    if (w && f.cmd === w.cmd && (!w.accept || f.status !== 0 || w.accept(f))) {
+      w.settled = true; clearTimeout(w.timer); this.waiter = null; w.res(f);
+    }
+  }
+  _lock(fn) {
+    this.pending++;
+    const run = this.q.then(() => fn());
+    this.q = run.then(() => { this.pending--; }, () => { this.pending--; });
+    return run;
+  }
+  request(cmd, payload, o) {
+    o = o || {};
+    const retries = o.retries === undefined ? 3 : o.retries, timeout = o.timeout || 2000;
+    return this._lock(async () => {
+      const frame = makeFrame(cmd, payload);
+      let last = "";
+      for (let a = 0; a <= retries; a++) {
+        const w = { cmd: cmd, accept: o.accept, settled: false, timer: null };
+        w.promise = new Promise((res, rej) => { w.res = res; w.rej = rej; });
+        this.waiter = w;
+        try { await this.write(frame); }
+        catch (e) { this.waiter = null; throw new LinkError("Không gửi được dữ liệu: " + e.message); }
+        if (!w.settled) w.timer = setTimeout(() => { if (this.waiter === w) this.waiter = null; w.rej(new Error("timeout")); }, timeout);
+        let r;
+        try { r = await w.promise; } catch (e) { last = "không có phản hồi"; continue; }
+        if (r.status === 6) { last = "mạch nhận sai CRC"; continue; }
+        if (r.status === 1 && a > 0 && o.okIfStateOnRetry) return { status: 0, cmd: r.cmd, extra: r.extra };
+        if (r.status !== 0 && !o.allowStatus)
+          throw new LinkError("Mạch báo lỗi: " + (STATUS_TEXT[r.status] || "?") + " (mã " + r.status + ", tham số " + r.extra + ")");
+        return r;
+      }
+      throw new LinkError("Không liên lạc được với mạch (" + last + "). Kiểm tra baud 115200, dây TX/RX và nguồn.");
+    });
+  }
+  /* phím từ xa; drop = true: bỏ qua nếu đang bận (dùng cho tự lặp) */
+  key(k, drop) {
+    if (drop && this.pending > 0) return Promise.resolve(null);
+    return this.request(CMD.KEY, Uint8Array.of(k), { retries: 0, timeout: 900, allowStatus: true }).catch(() => null);
+  }
+  /* chọn thẳng file số n (1..N) trên mạch */
+  select(n) { return this.request(CMD.SELECT, Uint8Array.of(n), { retries: 1, timeout: 1200, allowStatus: true }).catch(() => null); }
+  status() { return this.request(CMD.STATUS, null, { retries: 1, timeout: 1200, allowStatus: true }); }
+  async sendImage(image, o) {
+    o = o || {};
+    const log = o.log || function () {}, progress = o.progress || function () {};
+    const total = image.length / PAGE;
+    const cap = (await this.request(CMD.PING)).extra;
+    log("Mạch trả lời. Dung lượng tối đa " + cap + " trang.");
+    if (total > cap) throw new LinkError("Dữ liệu quá lớn: cần " + total + " trang, mạch chỉ chứa được " + cap + " trang.");
+    log("Bắt đầu nạp " + total + " trang (" + image.length + " byte).");
+    await this.request(CMD.BEGIN, Uint8Array.of(total & 255, total >> 8), { timeout: 3500, accept: f => f.extra === total });
+    const order = [];
+    for (let i = 1; i < total; i++) order.push(i);
+    order.push(0);                                   // header gửi cuối: mạch chỉ ghi header khi dữ liệu đã đủ
+    for (let n = 0; n < order.length; n++) {
+      const idx = order[n];
+      const p = new Uint8Array(2 + PAGE);
+      p[0] = idx & 255; p[1] = idx >> 8;
+      p.set(image.subarray(idx * PAGE, (idx + 1) * PAGE), 2);
+      await this.request(CMD.PAGE, p, { timeout: 3000, accept: f => f.extra === idx });
+      progress(n + 1, total);
+    }
+    await this.request(CMD.END, null, { timeout: 3500, okIfStateOnRetry: true });
+    log("Nạp xong và kiểm tra thành công.");
+  }
+}
+</script>
+
+<script id="ui">
+/* ===== Giao diện, BLE, lưu danh sách file ===== */
+const $ = id => document.getElementById(id);
+const KNOWN_SERVICES = [0xFFE0, 0xFFE5, 0xFFF0, 0xFFB0, 0xFFC0, 0xFFD0, 0xFF00, 0xAE00, 0xAF30, 0xABF0, 0xFEE0, 0xFEE7, 0x18F0,
+  "6e400001-b5a3-f393-e0a9-e50e24dcca9e", "49535343-fe7d-4ae5-8fa9-9fafd205e455", "0000ffe0-0000-1000-8000-00805f9b34fb"];
+const PREFERRED = ["0000ffe0", "6e400001", "0000fff0", "49535343"];
+
+const S = { dev: null, link: null, rx: null, tx: null, connected: false, connecting: false, sending: false,
+  files: [], cap: DEFAULT_PAGES, mode: -1, level: 0, fileNo: 0, selId: null, nextId: 1, sentSig: null, wake: null, armTimer: null };
+
+function log(t) {
+  const el = $("log"), d = new Date(), p = n => String(n).padStart(2, "0");
+  el.textContent += "[" + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "] " + t + "\n";
+  const lines = el.textContent.split("\n"); if (lines.length > 220) el.textContent = lines.slice(-200).join("\n");
+  el.scrollTop = el.scrollHeight;
+}
+function setMsg(t, kind) { const m = $("msg"); m.textContent = t || ""; m.className = kind || ""; }
+function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
+
+/* ---------- Lưu danh sách file (IndexedDB) ---------- */
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open("cx33", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function kvGet(k) {
+  try { const db = await idb(); return await new Promise((res, rej) => { const q = db.transaction("kv").objectStore("kv").get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+  catch (e) { return undefined; }
+}
+async function kvSet(k, v) {
+  try { const db = await idb(); await new Promise((res, rej) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+  catch (e) { log("Không lưu được danh sách vào trình duyệt."); }
+}
+const saveFiles = () => kvSet("files", S.files.map(f => ({ id: f.id, name: f.name, words: f.words, warnings: f.warnings, ms: f.ms })));
+
+/* ---------- Dữ liệu danh sách ---------- */
+const title = f => f.name.replace(/\.txt$/i, "");
+function sortFiles() {
+  S.files.sort((a, b) => title(a).localeCompare(title(b), "vi", { numeric: true, sensitivity: "base" }) || a.id - b.id);
+}
+function sig() {      // nhận dạng danh sách đã gửi: tên + số dòng + CRC nội dung theo thứ tự
+  return S.files.map(f => f.name + ":" + f.words.length + ":" + crc16(new Uint8Array(f.words.buffer, f.words.byteOffset, f.words.byteLength))).join("|");
+}
+const synced = () => S.sentSig !== null && S.sentSig === sig();
+function totals() {
+  let lines = 0; for (const f of S.files) lines += f.words.length;
+  return { lines: lines, pages: 1 + Math.ceil(lines * 2 / PAGE) };
+}
+const selIndex = () => S.files.findIndex(f => f.id === S.selId);
+
+/* ---------- Vẽ giao diện ---------- */
+function renderList() {
+  const ol = $("list");
+  ol.innerHTML = "";
+  if (!S.files.length) {
+    const li = document.createElement("li"); li.className = "empty";
+    li.textContent = "Chưa có file nào. Bấm “THÊM BÀI” để chọn các file txt. Danh sách tự xếp theo tên A→Z, số bên trái là số file trên mạch.";
+    ol.appendChild(li); return;
+  }
+  const playing = S.mode === 2 && S.connected && synced();
+  S.files.forEach((f, i) => {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "row"; b.dataset.id = f.id;
+    const sel = f.id === S.selId;
+    if (sel) { b.classList.add("sel"); b.setAttribute("aria-current", "true"); if (playing) b.classList.add("playing"); }
+    const n = document.createElement("span"); n.className = "n"; n.textContent = String(i + 1).padStart(2, "0");
+    const t = document.createElement("span"); t.className = "t";
+    const inner = document.createElement("span"); inner.textContent = title(f);
+    t.appendChild(inner);
+    if (sel && playing) b.style.setProperty("--d", Math.max(7, 5 + title(f).length * 0.28).toFixed(1) + "s");
+    b.append(n, t);
+    li.appendChild(b); ol.appendChild(li);
+  });
+  const cur = ol.querySelector(".row.sel"); if (cur && cur.scrollIntoView && !ol.matches(":active")) cur.scrollIntoView({ block: "nearest" });
+}
+function renderSide() {
+  $("speed").textContent = S.connected && S.level >= 1 && S.level <= 8 ? String(S.level) : "–";
+}
+function renderPad() {
+  const can = S.connected && !S.sending;
+  for (const id of ["kLui", "kToi", "kGiam", "kTang", "kSS"]) $(id).disabled = !can;
+  const play = S.mode === 2;
+  $("ssIcon").innerHTML = play ? '<rect class="f" x="6.5" y="6.5" width="11" height="11" rx="1.5"/>' : '<path class="f" d="M8 5v14l11-7z"/>';
+  $("ssLbl").textContent = play ? "STOP" : "START";
+}
+function renderFoot() {
+  const t = totals(), over = t.pages > S.cap;
+  $("capLeft").innerHTML = "";
+  const l = document.createElement("span");
+  l.textContent = S.files.length + " file · " + t.pages + " / " + S.cap + " trang";
+  if (over) { l.className = "over"; l.textContent += " (quá lớn)"; }
+  $("capLeft").appendChild(l);
+  const sy = $("sync");
+  if (!S.files.length) sy.textContent = "";
+  else if (synced()) { sy.className = "ok"; sy.textContent = "Mạch đã có danh sách này"; }
+  else { sy.className = "warn"; sy.textContent = "Chưa gửi xuống mạch"; }
+  const ok = S.connected && !S.sending && S.files.length > 0 && t.lines > 0 && !over;
+  $("btnSend").disabled = !ok;
+  $("btnAdd").disabled = S.sending;
+  $("btnDel").disabled = S.sending || !S.files.length;
+  $("btnConn").disabled = S.sending;
+  $("btnConn").className = "chip bt" + (S.connected ? " on" : S.connecting ? " busy" : "");
+  $("connText").className = S.connected ? "on" : "";
+}
+function renderAll() { renderList(); renderSide(); renderPad(); renderFoot(); }
+
+/* ---------- Danh sách: chọn, thêm, xoá ---------- */
+$("list").addEventListener("click", async e => {
+  const b = e.target.closest(".row"); if (!b || S.sending) return;
+  const id = +b.dataset.id, idx = S.files.findIndex(f => f.id === id);
+  if (idx < 0) return;
+  S.selId = id; renderAll();
+  if (!S.connected || !S.link) return;
+  if (!synced()) { setMsg("Danh sách đã đổi nên chưa chọn được trên mạch. Bấm GỬI để cập nhật mạch.", "err"); return; }
+  const r = await S.link.select(idx + 1);
+  if (r && r.status === 1) setMsg(unpackStatus(r.extra).mode === 3 ? "Mạch đang nhận file." : "Mạch chưa có dữ liệu file.", "err");
+  else if (r && r.status === 2) setMsg("Số file không có trên mạch. Bấm GỬI để cập nhật mạch.", "err");
+  else if (r) setMsg("");
+});
+$("btnAdd").addEventListener("click", () => $("fileIn").click());
+$("fileIn").addEventListener("change", async e => {
+  const errs = []; let added = 0, updated = 0, lastId = null;
+  for (const file of Array.from(e.target.files)) {
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const r = parseTxt(file.name, decodeText(buf));
+      const old = S.files.find(f => f.name === file.name);
+      if (old) { old.words = r.words; old.warnings = r.warnings; old.ms = r.ms; updated++; lastId = old.id; continue; }
+      if (S.files.length >= MAX_FILES) { errs.push("Đã đủ " + MAX_FILES + " file, bỏ " + file.name); continue; }
+      const f = { id: S.nextId++, name: file.name, words: r.words, warnings: r.warnings, ms: r.ms };
+      S.files.push(f); added++; lastId = f.id;
+    } catch (err) { errs.push(err.message); }
+  }
+  e.target.value = "";
+  sortFiles(); if (lastId !== null) S.selId = lastId;
+  saveFiles(); renderAll();
+  const warn = S.files.flatMap(f => f.warnings.map(w => f.name + ": " + w));
+  if (errs.length) { setMsg(errs.join(" · "), "err"); errs.forEach(log); }
+  else if (added || updated) setMsg("Đã thêm " + added + " file" + (updated ? ", cập nhật " + updated : "") + ". Bấm GỬI để cập nhật cho mạch." + (warn.length ? " Cảnh báo: " + warn[0] : ""), "");
+});
+function disarm() { clearTimeout(S.armTimer); S.armTimer = null; $("btnDel").classList.remove("armed"); $("delLbl").textContent = "XOÁ"; }
+$("btnDel").addEventListener("click", () => {
+  if (S.sending || !S.files.length) return;
+  if (selIndex() < 0) { setMsg("Chạm vào một file trong danh sách để chọn file cần xoá.", "err"); return; }
+  if (!S.armTimer) {                                   // lần chạm đầu: hỏi lại
+    $("btnDel").classList.add("armed"); $("delLbl").textContent = "XÁC NHẬN";
+    setMsg("Chạm XOÁ lần nữa để xoá “" + title(S.files[selIndex()]) + "”.", "err");
+    S.armTimer = setTimeout(() => { disarm(); setMsg(""); }, 3500); return;
+  }
+  const i = selIndex(); disarm();
+  const gone = S.files.splice(i, 1)[0];
+  S.selId = S.files.length ? S.files[Math.min(i, S.files.length - 1)].id : null;
+  saveFiles(); renderAll();
+  setMsg("Đã xoá “" + title(gone) + "”. Bấm GỬI để cập nhật cho mạch.", "");
+});
+
+/* ---------- BLE ---------- */
+function normUuid(s) {
+  s = (s || "").trim().toLowerCase().replace(/^0x/, "");
+  if (!s) return null;
+  if (/^[0-9a-f]{4}$/.test(s) || /^[0-9a-f]{8}$/.test(s)) return parseInt(s, 16);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s)) return s;
+  throw new Error("UUID không hợp lệ: " + s);
+}
+const full = u => typeof u === "number" ? "0000" + u.toString(16).padStart(4, "0") + "-0000-1000-8000-00805f9b34fb" : u;
+const sameUuid = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+const short = u => /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/.test(u) ? u.slice(4, 8).toUpperCase() : u;
+
+async function findChannels(server) {
+  const csvc = normUuid(ls("uuidSvc")), crx = normUuid(ls("uuidRx")), ctx = normUuid(ls("uuidTx"));
+  const services = await server.getPrimaryServices();
+  const found = [];
+  for (const s of services) {
+    if (/^0000(1800|1801)-/.test(s.uuid)) continue;
+    let chars = [];
+    try { chars = await s.getCharacteristics(); } catch (e) { continue; }
+    log("Service " + short(s.uuid) + ": " + chars.map(c => {
+      const p = c.properties, f = [];
+      if (p.notify) f.push("notify"); if (p.indicate) f.push("indicate"); if (p.write) f.push("write"); if (p.writeWithoutResponse) f.push("writeNoResp"); if (p.read) f.push("read");
+      return short(c.uuid) + "[" + f.join(",") + "]";
+    }).join(" "));
+    found.push({ s: s, chars: chars });
+  }
+  if (!found.length) throw new Error("Không thấy service nào. Hãy nhập UUID service của module vào phần Cài đặt rồi kết nối lại.");
+  let cand = found;
+  if (csvc !== null) cand = found.filter(x => sameUuid(x.s.uuid, full(csvc)));
+  cand.sort((a, b) => {
+    const pa = PREFERRED.findIndex(p => a.s.uuid.startsWith(p)), pb = PREFERRED.findIndex(p => b.s.uuid.startsWith(p));
+    return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb);
+  });
+  const match = (c, u) => u === null || sameUuid(c.uuid, full(u));
+  for (const x of cand) {
+    const rxc = x.chars.filter(c => (c.properties.notify || c.properties.indicate) && match(c, crx));
+    const txc = x.chars.filter(c => (c.properties.writeWithoutResponse || c.properties.write) && match(c, ctx));
+    if (rxc.length && txc.length) {
+      const rx = rxc[0];
+      return { rx: rx, tx: txc.find(c => c === rx) || txc.find(c => c.properties.writeWithoutResponse) || txc[0] };
+    }
+  }
+  throw new Error("Không tìm thấy kênh nhận (notify) và kênh gửi (write) trong cùng một service. Xem nhật ký trong Cài đặt để biết module có những kênh nào.");
+}
+
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+function noBluetoothMsg() {
+  return isIOS ? "Safari và Chrome trên iPhone không hỗ trợ Bluetooth cho trang web. Hãy mở trang này bằng trình duyệt Bluefy (tải miễn phí trên App Store)."
+               : "Trình duyệt này không hỗ trợ Bluetooth cho trang web. Hãy mở trang này bằng Chrome trên Android.";
+}
+
+function onStatus(st) {
+  S.mode = st.mode;
+  if (st.level >= 1 && st.level <= 8) S.level = st.level;
+  if ((st.mode === 1 || st.mode === 2) && st.file > 0) {
+    S.fileNo = st.file;
+    if (synced() && S.files[st.file - 1]) S.selId = S.files[st.file - 1].id;
+  }
+  renderAll();
+}
+
+async function connect() {
+  if (!navigator.bluetooth) { setMsg(noBluetoothMsg(), "err"); return; }
+  S.connecting = true; $("connText").textContent = "Đang chọn thiết bị…"; setMsg(""); renderFoot();
+  try {
+    const extra = [];
+    try { const c = normUuid(ls("uuidSvc")); if (c !== null) extra.push(c); } catch (e) { setMsg(e.message, "err"); }
+    let dev = S.dev;
+    if (!dev) dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: KNOWN_SERVICES.concat(extra) });
+    S.dev = dev;
+    dev.removeEventListener("gattserverdisconnected", onDisc);
+    dev.addEventListener("gattserverdisconnected", onDisc);
+    $("connText").textContent = "Đang kết nối " + (dev.name || "thiết bị") + "…";
+    const server = await dev.gatt.connect();
+    const ch = await findChannels(server);
+    S.rx = ch.rx; S.tx = ch.tx;
+    const size = Math.max(1, Math.min(512, parseInt($("chunk").value, 10) || 20));
+    const noResp = !!S.tx.properties.writeWithoutResponse;
+    S.link = new Link(async bytes => {
+      for (let i = 0; i < bytes.length; i += size) {
+        const part = bytes.subarray(i, i + size);
+        if (noResp && S.tx.writeValueWithoutResponse) await S.tx.writeValueWithoutResponse(part);
+        else await S.tx.writeValue(part);
+      }
+    });
+    S.link.onStatus = onStatus;
+    await S.rx.startNotifications();
+    S.rx.addEventListener("characteristicvaluechanged", e => { const v = e.target.value; S.link && S.link.onBytes(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)); });
+    S.connected = true; S.connecting = false; S.mode = -1;
+    log("Kênh nhận " + short(S.rx.uuid) + ", kênh gửi " + short(S.tx.uuid) + ", gói " + size + " byte" + (noResp ? ", không chờ phản hồi" : ", có phản hồi"));
+    $("connText").textContent = dev.name || "Đã kết nối";
+    renderAll();
+    try { S.wake = await navigator.wakeLock.request("screen"); } catch (e) {}
+    await new Promise(r => setTimeout(r, 250));
+    const r = await S.link.status().catch(() => null);
+    if (!r) setMsg("Đã kết nối BLE nhưng mạch chưa trả lời. Kiểm tra baud 115200 của module và dây TX/RX.", "err");
+    else if (unpackStatus(r.extra).mode === 0) setMsg("Mạch chưa có dữ liệu file. Thêm file rồi bấm GỬI.", "");
+    else if (!synced() && S.files.length) setMsg("Chưa rõ mạch đang có danh sách nào. Bấm GỬI để đồng bộ.", "");
+  } catch (e) {
+    S.connected = false; S.connecting = false;
+    try { S.dev && S.dev.gatt && S.dev.gatt.connected && S.dev.gatt.disconnect(); } catch (x) {}
+    $("connText").textContent = "Không kết nối"; renderAll();
+    const name = e && e.name;
+    if (name === "NotFoundError") setMsg("Chưa chọn thiết bị nào.", "");
+    else if (name === "SecurityError" || name === "NotAllowedError") { setMsg("Trình duyệt không cho trang này dùng Bluetooth. Mở trang trong Chrome (Android) hoặc Bluefy (iPhone), không mở trong khung nhúng.", "err"); log(String(e)); }
+    else { setMsg(e.message || String(e), "err"); log(String(e)); }
+  }
+}
+function onDisc() {
+  endAllRepeat();
+  const was = S.connected;
+  S.connected = false; S.connecting = false; S.link = null; S.mode = -1; S.sending = false;
+  try { S.wake && S.wake.release(); } catch (e) {}
+  $("connText").textContent = "Không kết nối";
+  if (was) setMsg("Mất kết nối với module BLE. Bấm nút Bluetooth để nối lại.", "err");
+  log("Mất kết nối BLE"); $("prog").hidden = true; renderAll();
+}
+$("btnConn").addEventListener("click", () => {
+  if (S.connected) { const d = S.dev; S.dev = null; try { d.gatt.disconnect(); } catch (e) {} onDisc(); setMsg(""); return; }
+  if (!S.connecting) connect();
+});
+
+/* ---------- Phím điều khiển ---------- */
+const repeaters = [];
+function endAllRepeat() { repeaters.forEach(f => f()); }
+function press(k, drop) {
+  if (!S.connected || S.sending || !S.link) return;
+  S.link.key(k, drop).then(r => {
+    if (!r) return;
+    if (r.status === 1) setMsg(unpackStatus(r.extra).mode === 3 ? "Mạch đang nhận file." : "Mạch chưa có dữ liệu file. Thêm file rồi bấm GỬI.", "err");
+    else if (r.status === 0 && $("msg").classList.contains("err")) setMsg("");
+  });
+}
+function bindKey(id, key, repeat) {
+  const b = $(id); let t1 = null, t2 = null;
+  const end = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+  if (repeat) repeaters.push(end);
+  b.addEventListener("pointerdown", e => {
+    if (b.disabled) return;
+    e.preventDefault();
+    try { b.setPointerCapture(e.pointerId); } catch (x) {}
+    press(key, false);
+    if (repeat) { end(); t1 = setTimeout(() => { t2 = setInterval(() => press(key, true), 100); }, 500); }
+  });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(n => b.addEventListener(n, end));
+  b.addEventListener("click", e => { if (e.detail === 0 && !b.disabled) press(key, false); });   // bàn phím (Enter/Space)
+  b.addEventListener("contextmenu", e => e.preventDefault());
+}
+bindKey("kToi", KEY.TOI, true); bindKey("kLui", KEY.LUI, true);
+bindKey("kTang", KEY.TANG, false); bindKey("kGiam", KEY.GIAM, false); bindKey("kSS", KEY.SS, false);
+document.addEventListener("visibilitychange", () => { if (document.hidden) endAllRepeat(); });
+
+/* ---------- Gửi xuống mạch ---------- */
+$("btnSend").addEventListener("click", async () => {
+  if (!S.connected || S.sending) return;
+  S.sending = true; endAllRepeat(); disarm();
+  $("prog").hidden = false; $("progFill").style.width = "0"; $("progText").textContent = "Đang chuẩn bị…";
+  setMsg("Đang gửi file xuống mạch. Giữ điện thoại gần mạch, không đóng trang.", "");
+  renderAll();
+  const t0 = Date.now();
+  try {
+    const image = buildImage(S.files.map(f => f.words));
+    await S.link.sendImage(image, {
+      log: log,
+      progress: (n, total) => {
+        $("progFill").style.width = (n / total * 100) + "%";
+        $("progText").textContent = "Đang gửi trang " + n + " / " + total + " · " + Math.round(n / total * 100) + "%";
+      }
+    });
+    S.sentSig = sig(); ls("sentSig", S.sentSig);
+    S.sending = false;
+    setMsg("Đã gửi xong " + S.files.length + " file (" + Math.round((Date.now() - t0) / 1000) + " s).", "ok");
+    await S.link.status().catch(() => null);      // cập nhật file đang chọn, tốc độ, trạng thái
+  } catch (e) {
+    setMsg(e.message || String(e), "err"); log(String(e.message || e));
+  } finally {
+    S.sending = false; $("prog").hidden = true;
+    renderAll();
+  }
+});
+
+/* ---------- Cài đặt ---------- */
+$("btnSet").addEventListener("click", () => { $("sheet").hidden = false; });
+$("btnClose").addEventListener("click", () => { $("sheet").hidden = true; });
+$("sheet").addEventListener("click", e => { if (e.target === $("sheet")) $("sheet").hidden = true; });
+for (const id of ["uuidSvc", "uuidRx", "uuidTx", "chunk"]) {
+  const el = $(id), v = ls(id);
+  if (v) el.value = v;
+  el.addEventListener("change", () => ls(id, el.value.trim()));
+}
+
+/* ---------- Khởi động ---------- */
+(async function init() {
+  S.sentSig = ls("sentSig");
+  renderAll();
+  const saved = await kvGet("files");
+  if (Array.isArray(saved)) {
+    S.files = saved.filter(f => f && f.words && f.name).map(f => ({ id: f.id, name: f.name, words: f.words, warnings: f.warnings || [], ms: f.ms || 0 }));
+    S.nextId = S.files.reduce((m, f) => Math.max(m, f.id || 0), 0) + 1;
+    sortFiles();
+    if (S.files.length) S.selId = S.files[0].id;
+  }
+  renderAll();
+  if (!navigator.bluetooth) setMsg(noBluetoothMsg(), "err");
+})();
+</script>
+
+</html>
