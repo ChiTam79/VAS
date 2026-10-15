@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}</style>
-<title>CX33 Điều khiển</title>
+<title>VAS Điều khiển</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
 <style>
@@ -12,7 +12,7 @@
 :root{
   --bg:#1a1c1e; --surface:#24272a; --line:#363a3e; --fg:#eef1f3; --muted:#98a2a8;
   --sel-bg:#12908e; --sel-fg:#ffffff; --speed:#ffd21f; --ok:#59d38b; --warn:#ffb74d; --danger:#ff8a80;
-  --accent:#4cc3e0; --ring:#e7eaec;
+  --accent:#4cc3e0; --ring:#e7eaec; --brand:#ee3b2f;
   --c-lui:#1f8fd1; --c-toi:#f0a90f; --c-go:#e8622a; --c-cham:#12a18a; --c-nhanh:#2e9e4d;
   --c-gui:#7a4cd6; --c-them:#2e9e4d; --c-xoa:#e0a010; --ink:#ffffff; --ink-dark:#201600;
   --sans:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -22,11 +22,11 @@
 @media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
   --bg:#e8ebed; --surface:#ffffff; --line:#cdd2d6; --fg:#15191c; --muted:#5b666d;
   --sel-bg:#bfe8e5; --sel-fg:#043f3d; --speed:#a86f00; --ok:#1d7a46; --warn:#9a5b00; --danger:#b3261e;
-  --accent:#0b6e8a; --ring:#ffffff; color-scheme:light}}
+  --accent:#0b6e8a; --ring:#ffffff; --brand:#d62718; color-scheme:light}}
 :root[data-theme="light"]{
   --bg:#e8ebed; --surface:#ffffff; --line:#cdd2d6; --fg:#15191c; --muted:#5b666d;
   --sel-bg:#bfe8e5; --sel-fg:#043f3d; --speed:#a86f00; --ok:#1d7a46; --warn:#9a5b00; --danger:#b3261e;
-  --accent:#0b6e8a; --ring:#ffffff; color-scheme:light}
+  --accent:#0b6e8a; --ring:#ffffff; --brand:#d62718; color-scheme:light}
 *{box-sizing:border-box}
 html,body{height:100%}
 @supports (height:100dvh){html,body{height:100dvh}}
@@ -39,7 +39,7 @@ button:disabled{cursor:not-allowed}
 .app{max-width:520px;height:100%;margin:0 auto;display:flex;flex-direction:column;gap:8px;min-height:0}
 .bar{display:flex;align-items:center;gap:10px;min-height:48px}
 .title{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.1}
-.title b{font:700 26px var(--disp);letter-spacing:.04em}
+.title b{font:700 52px/1 var(--disp);letter-spacing:.04em;color:var(--brand)}
 .title span{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .title span.on{color:var(--ok)}
 .chip{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:2px solid var(--line)}
@@ -101,7 +101,7 @@ button:disabled{cursor:not-allowed}
 
 <div class="app">
   <header class="bar">
-    <div class="title"><b>CX33</b><span id="connText">Không kết nối</span></div>
+    <div class="title"><b>VAS</b><span id="connText">Không kết nối</span></div>
     <button class="chip" id="btnSet" type="button" aria-label="Cài đặt"><svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
     <button class="chip bt" id="btnConn" type="button" aria-label="Kết nối Bluetooth"><svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg></button>
   </header>
@@ -602,7 +602,7 @@ async function connect() {
     const name = e && e.name;
     if (name === "NotFoundError") setMsg("Chưa chọn thiết bị nào.", "");
     else if (name === "SecurityError" || name === "NotAllowedError") { setMsg("Trình duyệt không cho trang này dùng Bluetooth. Mở trang trong Chrome (Android) hoặc Bluefy (iPhone), không mở trong khung nhúng.", "err"); log(String(e)); }
-    else { setMsg(e.message || String(e), "err"); log(String(e)); }
+    else { setMsg((name ? name + ": " : "") + (e && e.message ? e.message : String(e)), "err"); log(String(e)); }
   }
 }
 function onDisc() {
