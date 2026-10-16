@@ -620,12 +620,13 @@ const full = u => typeof u === "number" ? "0000" + u.toString(16).padStart(4, "0
 const sameUuid = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const short = u => /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/.test(u) ? u.slice(4, 8).toUpperCase() : u;
 
+const norm128 = u => { u = String(u).toLowerCase(); return /^[0-9a-f]{4}$/.test(u) ? "0000" + u + "-0000-1000-8000-00805f9b34fb" : /^[0-9a-f]{8}$/.test(u) ? u + "-0000-1000-8000-00805f9b34fb" : u; };
 async function findChannels(server) {
   const csvc = normUuid(ls("uuidSvc")), crx = normUuid(ls("uuidRx")), ctx = normUuid(ls("uuidTx"));
   const services = await server.getPrimaryServices();
   const found = [];
   for (const s of services) {
-    if (/^0000(1800|1801)-/.test(s.uuid)) continue;
+    if (/^0000(18[0-9a-f]{2})-0000-1000-8000-00805f9b34fb$/i.test(norm128(s.uuid)) || /^1[89][0-9a-f]{2}$/i.test(s.uuid)) continue;   // bỏ các dịch vụ chuẩn 0x18xx (Tx Power, Battery, Device Info…)
     let chars = [];
     try { chars = await s.getCharacteristics(); } catch (e) { continue; }
     log("Service " + short(s.uuid) + ": " + chars.map(c => {
@@ -639,7 +640,7 @@ async function findChannels(server) {
   let cand = found;
   if (csvc !== null) cand = found.filter(x => sameUuid(x.s.uuid, full(csvc)));
   cand.sort((a, b) => {
-    const pa = PREFERRED.findIndex(p => a.s.uuid.startsWith(p)), pb = PREFERRED.findIndex(p => b.s.uuid.startsWith(p));
+    const pa = PREFERRED.findIndex(p => norm128(a.s.uuid).startsWith(p)), pb = PREFERRED.findIndex(p => norm128(b.s.uuid).startsWith(p));
     return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb);
   });
   const match = (c, u) => u === null || sameUuid(c.uuid, full(u));
@@ -647,7 +648,8 @@ async function findChannels(server) {
     const rxc = x.chars.filter(c => (c.properties.notify || c.properties.indicate) && match(c, crx));
     const txc = x.chars.filter(c => (c.properties.writeWithoutResponse || c.properties.write) && match(c, ctx));
     if (rxc.length && txc.length) {
-      const rx = rxc[0];
+      const both = rxc.find(c => txc.includes(c));                 // một kênh vừa notify vừa write (kiểu FFE1)
+      const rx = both || rxc[0];
       return { rx: rx, tx: txc.find(c => c === rx) || txc.find(c => c.properties.writeWithoutResponse) || txc[0] };
     }
   }
