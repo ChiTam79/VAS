@@ -655,6 +655,10 @@ async function findChannels(server) {
 }
 
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+function errText(e) {
+  if (e && typeof e === "object") return (e.name ? e.name + ": " : "") + (e.message || "") + (e.code !== undefined ? " [mã " + e.code + "]" : "") || Object.prototype.toString.call(e);
+  return "mã lỗi " + String(e);
+}
 function noBluetoothMsg() {
   return isIOS ? "Safari và Chrome trên iPhone không hỗ trợ Bluetooth cho trang web. Hãy mở trang này bằng trình duyệt Bluefy (tải miễn phí trên App Store)."
                : "Trình duyệt này không hỗ trợ Bluetooth cho trang web. Hãy mở trang này bằng Chrome trên Android.";
@@ -678,7 +682,16 @@ async function connect() {
     const extra = [];
     try { const c = normUuid(ls("uuidSvc")); if (c !== null) extra.push(c); } catch (e) { setMsg(e.message, "err"); }
     let dev = S.dev;
-    if (!dev) dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: KNOWN_SERVICES.concat(extra) });
+    if (!dev) {
+      const asStr = u => (typeof u === "number" ? full(u) : u);       // Bluefy cần UUID dạng chuỗi đầy đủ
+      const all = Array.from(new Set(KNOWN_SERVICES.concat(extra).map(asStr)));
+      try { dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: all }); }
+      catch (e1) {
+        if (e1 && e1.name === "NotFoundError") throw e1;
+        log("requestDevice lỗi: " + errText(e1) + " — thử lại với danh sách service ngắn.");
+        dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ["0000ffe0-0000-1000-8000-00805f9b34fb"].concat(extra.map(asStr)) });
+      }
+    }
     S.dev = dev;
     dev.removeEventListener("gattserverdisconnected", onDisc);
     dev.addEventListener("gattserverdisconnected", onDisc);
@@ -715,7 +728,7 @@ async function connect() {
     const name = e && e.name;
     if (name === "NotFoundError") setMsg("Chưa chọn thiết bị nào.", "");
     else if (name === "SecurityError" || name === "NotAllowedError") { setMsg("Trình duyệt không cho trang này dùng Bluetooth. Mở trang trong Chrome (Android) hoặc Bluefy (iPhone), không mở trong khung nhúng.", "err"); log(String(e)); }
-    else { setMsg((name ? name + ": " : "") + (e && e.message ? e.message : String(e)), "err"); log(String(e)); }
+    else { setMsg("Không kết nối được (" + errText(e) + "). Kiểm tra: Bluetooth của iPhone đã bật, Cài đặt > Bluefy > Bluetooth đã cho phép, module BLE đã cấp nguồn. Chi tiết trong Cài đặt > nhật ký.", "err"); log("Lỗi kết nối: " + errText(e)); }
   }
 }
 function onDisc() {
@@ -783,3 +796,5 @@ for (const id of ["uuidSvc", "uuidRx", "uuidTx", "chunk"]) {
   if (!navigator.bluetooth) setMsg(noBluetoothMsg(), "err");
 })();
 </script>
+
+</html>
