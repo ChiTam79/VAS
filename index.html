@@ -132,7 +132,7 @@ button:disabled{cursor:not-allowed}
 
 <div class="sheet" id="sheet" hidden>
   <div class="box" role="dialog" aria-modal="true" aria-label="Cài đặt">
-    <h2>Cài đặt BLE · bản 9 <button class="close" id="btnClose" type="button">Đóng</button></h2>
+    <h2>Cài đặt BLE · bản 11 <button class="close" id="btnClose" type="button">Đóng</button></h2>
     <label for="uuidSvc">UUID service (để trống để tự tìm)
       <input id="uuidSvc" placeholder="FFE0 hoặc 6e400001-b5a3-f393-e0a9-e50e24dcca9e" autocomplete="off" spellcheck="false"></label>
     <label for="uuidRx">UUID nhận dữ liệu từ mạch (notify)
@@ -142,6 +142,12 @@ button:disabled{cursor:not-allowed}
     <label for="chunk">Số byte mỗi gói BLE
       <input id="chunk" inputmode="numeric" value="20" autocomplete="off"></label>
     <p>Nếu app không tìm thấy kênh dữ liệu, mở nRF Connect để xem UUID của module, nhập vào đây rồi kết nối lại. Số byte mỗi gói để 20 là an toàn nhất.</p>
+    <label for="testText">Gửi thử chữ xuống module (hiện trên Hercules)
+      <input id="testText" value="Xin chao VAS" autocomplete="off" spellcheck="false"></label>
+    <button id="btnSendText" type="button" style="margin-top:8px;min-height:44px;padding:0 14px;border-radius:8px;border:1px solid var(--line);color:var(--accent);font-weight:600">Gửi chữ (kèm xuống dòng)</button>
+    <p>Khi cửa sổ Cài đặt đang mở, mọi dữ liệu module gửi lên điện thoại (ví dụ chữ bạn gõ trong Hercules) cũng hiện trong nhật ký bên dưới.</p>
+    <button id="btnProbe" type="button" style="margin-top:12px;min-height:44px;padding:0 14px;border-radius:8px;border:1px solid var(--line);color:var(--accent);font-weight:600">Gửi thử vào từng kênh ghi</button>
+    <p>Kết nối module rồi bấm nút trên. App gửi chữ A vào kênh ghi thứ nhất, chữ B vào kênh thứ hai… (mỗi lần 3 byte). Xem chữ nào hiện ra ở phía UART để biết kênh nào đúng, rồi nhập UUID kênh đó vào ô “gửi dữ liệu xuống mạch”.</p>
     <pre id="log" aria-label="Nhật ký"></pre>
   </div>
 </div>
@@ -636,6 +642,7 @@ async function findChannels(server) {
     }).join(" "));
     found.push({ s: s, chars: chars });
   }
+  S.writeChars = found.flatMap(x => x.chars.filter(c => c.properties.write || c.properties.writeWithoutResponse));
   if (!found.length) throw new Error("Không thấy service nào. Hãy nhập UUID service của module vào phần Cài đặt rồi kết nối lại.");
   let cand = found;
   if (csvc !== null) cand = found.filter(x => sameUuid(x.s.uuid, full(csvc)));
@@ -713,7 +720,9 @@ async function connect() {
     });
     S.link.onStatus = onStatus;
     await S.rx.startNotifications();
-    S.rx.addEventListener("characteristicvaluechanged", e => { const v = e.target.value; S.link && S.link.onBytes(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)); });
+    S.rx.addEventListener("characteristicvaluechanged", e => { const v = e.target.value; const b = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+      if (!$("sheet").hidden) log("Nhận " + b.length + " byte: " + Array.from(b, x => x.toString(16).padStart(2, "0")).join(" ") + "  | " + Array.from(b, x => (x >= 32 && x < 127) ? String.fromCharCode(x) : ".").join(""));
+      S.link && S.link.onBytes(b); });
     S.connected = true; S.connecting = false; S.mode = -1; S.verified = false; S.needSync = false;
     log("Kênh nhận " + short(S.rx.uuid) + ", kênh gửi " + short(S.tx.uuid) + ", gói " + size + " byte" + (noResp ? ", không chờ phản hồi" : ", có phản hồi"));
     $("connText").textContent = dev.name || "Đã kết nối";
@@ -776,6 +785,26 @@ function bindKey(id, key, repeat) {
 bindKey("kToi", KEY.TOI, true); bindKey("kLui", KEY.LUI, true);
 bindKey("kTang", KEY.TANG, false); bindKey("kGiam", KEY.GIAM, false); bindKey("kSS", KEY.SS, false);
 document.addEventListener("visibilitychange", () => { if (document.hidden) endAllRepeat(); });
+
+/* ---------- Gửi thử chữ (chẩn đoán hai chiều với Hercules) ---------- */
+$("btnSendText").addEventListener("click", async () => {
+  if (!S.connected || !S.link) { setMsg("Hãy kết nối module trước.", "err"); log("Chưa kết nối nên chưa gửi được."); return; }
+  const text = $("testText").value + "\r\n", bytes = new TextEncoder().encode(text);
+  try { await S.link.write(bytes); log("Đã gửi " + bytes.length + " byte: " + JSON.stringify(text)); }
+  catch (e) { log("Lỗi gửi: " + errText(e)); }
+});
+/* ---------- Gửi thử vào từng kênh ghi (chẩn đoán) ---------- */
+$("btnProbe").addEventListener("click", async () => {
+  if (!S.connected || !S.writeChars || !S.writeChars.length) { setMsg("Hãy kết nối module trước.", "err"); log("Chưa kết nối nên chưa gửi thử được."); return; }
+  for (let i = 0; i < S.writeChars.length; i++) {
+    const c = S.writeChars[i], ch = 65 + i, data = Uint8Array.of(ch, ch, ch);
+    try {
+      if (c.properties.writeWithoutResponse && c.writeValueWithoutResponse) await c.writeValueWithoutResponse(data); else await c.writeValue(data);
+      log("Đã gửi '" + String.fromCharCode(ch).repeat(3) + "' vào kênh " + short(c.uuid) + " (" + (i + 1) + "/" + S.writeChars.length + ")");
+    } catch (e) { log("Kênh " + short(c.uuid) + ": lỗi ghi " + errText(e)); }
+    await sleep(600);
+  }
+});
 
 /* ---------- Cài đặt ---------- */
 $("btnSet").addEventListener("click", () => { $("sheet").hidden = false; });
